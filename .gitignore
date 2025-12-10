@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtualenvs
+.venv/
+venv/
+Python_CB3PO/
+CB3PO/
+
+# OS / editor files
+.DS_Store
+
