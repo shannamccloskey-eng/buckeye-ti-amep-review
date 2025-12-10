@@ -39,22 +39,7 @@ def analyze_plans_for_food_service(
     project_type: str,
 ) -> Dict[str, Any]:
     """
-    Ask the model to analyze the plan text for:
-      - Is this a food service use?
-      - Are there any of the following shown or referenced:
-        grease interceptor, walk-in coolers/freezers, hoods, IECC/energy code.
-    Returns a dict with:
-      {
-        "is_food_service_by_plans": bool,
-        "found_items": {
-          "grease_interceptor": bool,
-          "walk_in_cooler": bool,
-          "walk_in_freezer": bool,
-          "hood": bool,
-          "iecc_energy_code": bool
-        },
-        "notes": "string explanation"
-      }
+    Use GPT to scan the full plan text for food-service signals and specific items.
     """
     user_prompt = f"""
 You are assisting the City of Buckeye Building Department with COMMERCIAL PLAN INTAKE
@@ -103,7 +88,6 @@ PDF_PLAN_TEXT_END
 
     raw_text = response.output_text.strip()
 
-    # Try to parse JSON. If it fails, return safe defaults.
     try:
         data = json.loads(raw_text)
     except Exception:
@@ -119,7 +103,6 @@ PDF_PLAN_TEXT_END
             "notes": "Model response could not be parsed as JSON. Treating as no food-service items detected.",
         }
 
-    # Ensure keys exist and are well-formed
     found = data.get("found_items", {}) or {}
     defaults = {
         "grease_interceptor": False,
@@ -137,33 +120,150 @@ PDF_PLAN_TEXT_END
     }
 
 
+def classify_support_doc(
+    client: OpenAI,
+    doc_text: str,
+    filename: str,
+) -> Dict[str, Any]:
+    """
+    Classify a single supporting document into the known document types.
+    Returns:
+      {
+        "doc_types": {
+            "geotech_report": bool,
+            "deferred_truss_form": bool,
+            "special_inspections_form": bool,
+            "struct_calcs": bool,
+            "struct_sheets": bool,
+            "grease_interceptor": bool,
+            "walk_in_cooler": bool,
+            "walk_in_freezer": bool,
+            "hood_specs": bool,
+            "iecc_docs": bool
+        },
+        "notes": "short reasoning"
+      }
+    """
+    user_prompt = f"""
+You are assisting City of Buckeye Building Department with COMMERCIAL PLAN INTAKE.
+
+A single supporting document has been uploaded with filename: "{filename}".
+
+Based on the text content provided, classify whether this document is any of
+the following types (multiple may be true):
+
+- geotech_report: geotechnical / soils report
+- deferred_truss_form: deferred truss submittal form or truss design summary
+- special_inspections_form: special inspections statement, schedule, or agreement
+- struct_calcs: structural calculations (beams, columns, foundations, etc.)
+- struct_sheets: separate structural sheets or structural framing plans
+- grease_interceptor: grease interceptor details, sizing, or shop drawings
+- walk_in_cooler: walk-in cooler submittal, cut sheet, or layout
+- walk_in_freezer: walk-in freezer submittal, cut sheet, or layout
+- hood_specs: hood specifications, hood schedule, or hood shop drawings
+- iecc_docs: IECC / energy code compliance forms, COMcheck, or similar
+
+Return ONLY valid JSON in this exact format (no commentary):
+
+{{
+  "doc_types": {{
+    "geotech_report": true/false,
+    "deferred_truss_form": true/false,
+    "special_inspections_form": true/false,
+    "struct_calcs": true/false,
+    "struct_sheets": true/false,
+    "grease_interceptor": true/false,
+    "walk_in_cooler": true/false,
+    "walk_in_freezer": true/false,
+    "hood_specs": true/false,
+    "iecc_docs": true/false
+  }},
+  "notes": "short explanation of your classification"
+}}
+
+DOC_TEXT_START
+{doc_text[:40000]}
+DOC_TEXT_END
+"""
+
+    response = client.responses.create(
+        model=MODEL_NAME,
+        instructions=(
+            "You are assisting City of Buckeye intake staff. "
+            "Follow the user instructions carefully and respond with STRICT JSON only."
+        ),
+        input=user_prompt,
+    )
+
+    raw_text = response.output_text.strip()
+    try:
+        data = json.loads(raw_text)
+    except Exception:
+        data = {
+            "doc_types": {},
+            "notes": "Could not parse model output as JSON.",
+        }
+
+    defaults = {
+        "geotech_report": False,
+        "deferred_truss_form": False,
+        "special_inspections_form": False,
+        "struct_calcs": False,
+        "struct_sheets": False,
+        "grease_interceptor": False,
+        "walk_in_cooler": False,
+        "walk_in_freezer": False,
+        "hood_specs": False,
+        "iecc_docs": False,
+    }
+    found_types = data.get("doc_types", {}) or {}
+    merged = {k: bool(found_types.get(k, v)) for k, v in defaults.items()}
+
+    return {
+        "doc_types": merged,
+        "notes": data.get("notes", ""),
+    }
+
+
 # ---------------- INTAKE LOGIC ----------------
+
+DOC_LABELS = {
+    "completed_application": "Completed Permit Application",
+    "arch_set": "Architectural Plan Set",
+    "mep_set": "MEP Plan Set (Mechanical, Electrical, Plumbing)",
+    "geotech_report": "Geotechnical Report",
+    "deferred_truss_form": "Deferred Truss Submittal Form",
+    "special_inspections_form": "Special Inspections Form",
+    "struct_calcs": "Structural Calculations",
+    "struct_sheets": "Structural Sheets",
+    "grease_interceptor": "Grease Interceptor Details/Submittal",
+    "walk_in_cooler": "Walk-in Cooler Submittal/Details",
+    "walk_in_freezer": "Walk-in Freezer Submittal/Details",
+    "hood_specs": "Hood Specifications / Hood Schedule",
+    "iecc_docs": "IECC / Energy Code Compliance Documentation",
+}
+
 
 def build_intake_checklist(
     project_type: str,
     is_food_service_checkbox: bool,
     plan_analysis: Dict[str, Any],
-    docs_provided: Dict[str, bool],
+    ai_detected_docs: Dict[str, bool],
+    doc_sources: Dict[str, List[str]],
 ) -> Dict[str, Any]:
     """
-    Build an intake checklist given:
-      - project_type: "Shell Building", "Ground-Up", "Tenant Improvement (TI)"
-      - is_food_service_checkbox: user-indicated food service
-      - plan_analysis: result of analyze_plans_for_food_service
-      - docs_provided: dict of document_code -> bool (submitted or not)
-
-    Returns dict with:
-      {
-        "rows": [ { "document": str, "required": bool, "provided": bool, "status": str, "notes": str }, ... ],
-        "missing_required": [list of document names],
-        "intake_status": "Ready for intake" | "Not ready for intake"
-      }
+    Build an intake checklist from:
+      - project_type
+      - food service flags
+      - AI analysis of plans (food-service features)
+      - AI classification of supporting documents
     """
+
     rows = []
 
-    # Helper to add row
-    def add_doc(code: str, label: str, required: bool, note: str = ""):
-        provided = bool(docs_provided.get(code, False))
+    def add_row(code: str, required: bool, note: str = ""):
+        label = DOC_LABELS.get(code, code)
+        provided = bool(ai_detected_docs.get(code, False))
         if required and not provided:
             status = "MISSING – Required for intake"
         elif required and provided:
@@ -172,6 +272,16 @@ def build_intake_checklist(
             status = "Provided – Not strictly required"
         else:
             status = "Not required"
+
+        src_files = doc_sources.get(code, [])
+        src_note = ""
+        if src_files:
+            src_note = f"Provided in file(s): {', '.join(src_files)}"
+            if note:
+                note = note + " " + src_note
+            else:
+                note = src_note
+
         rows.append(
             {
                 "code": code,
@@ -183,67 +293,57 @@ def build_intake_checklist(
             }
         )
 
-    # 1) Documents required for ALL project types
-    add_doc("completed_application", "Completed Permit Application", True)
-    add_doc("arch_set", "Architectural Plan Set", True)
-    add_doc("mep_set", "MEP Plan Set (Mechanical, Electrical, Plumbing)", True)
+    # 1) Always required docs – consider them "provided" if there is at least a main plan set
+    add_row("completed_application", required=True, note="Verified by intake staff from application submittal.")
+    add_row("arch_set", required=True, note="Typically included within the main plan PDF.")
+    add_row("mep_set", required=True, note="Typically included within the main plan PDF.")
 
-    # 2) Extra requirements for Shell + Ground-Up
+    # 2) Shell + Ground-Up extras
     if project_type in ("Shell Building", "Ground-Up"):
-        add_doc("geotech_report", "Geotechnical Report", True)
-        add_doc("deferred_truss_form", "Deferred Truss Submittal Form", True)
-        add_doc("special_inspections_form", "Special Inspections Form", True)
-        add_doc("struct_calcs", "Structural Calculations", True)
-        add_doc("struct_sheets", "Structural Sheets", True)
+        add_row("geotech_report", True)
+        add_row("deferred_truss_form", True)
+        add_row("special_inspections_form", True)
+        add_row("struct_calcs", True)
+        add_row("struct_sheets", True)
 
-    # 3) Food-service-driven requirements
+    # 3) Food-service-driven docs
     analysis_food = bool(plan_analysis.get("is_food_service_by_plans", False))
-    found = plan_analysis.get("found_items", {}) or {}
-    any_food_feature = any(found.values())
+    found_food_items = plan_analysis.get("found_items", {}) or {}
+    any_food_feature = any(found_food_items.values())
 
-    # Consider it food-service context if:
-    # - user checked the box, OR
-    # - plans clearly show food service, OR
-    # - any of the specific food-service features are found
     is_food_context = (
         (project_type in ("Ground-Up", "Tenant Improvement (TI)"))
         and (is_food_service_checkbox or analysis_food or any_food_feature)
     )
 
     if is_food_context:
-        note_base = "Required if plans show this food-service equipment or system."
-        add_doc(
+        base_note = "Required if plans show this food-service equipment or system."
+        add_row(
             "grease_interceptor",
-            "Grease Interceptor Details/Submittal",
-            required=bool(found.get("grease_interceptor", False)),
-            note=note_base,
+            required=bool(found_food_items.get("grease_interceptor", False)),
+            note=base_note,
         )
-        add_doc(
+        add_row(
             "walk_in_cooler",
-            "Walk-in Cooler Submittal/Details",
-            required=bool(found.get("walk_in_cooler", False)),
-            note=note_base,
+            required=bool(found_food_items.get("walk_in_cooler", False)),
+            note=base_note,
         )
-        add_doc(
+        add_row(
             "walk_in_freezer",
-            "Walk-in Freezer Submittal/Details",
-            required=bool(found.get("walk_in_freezer", False)),
-            note=note_base,
+            required=bool(found_food_items.get("walk_in_freezer", False)),
+            note=base_note,
         )
-        add_doc(
+        add_row(
             "hood_specs",
-            "Hood Specifications / Hood Schedule",
-            required=bool(found.get("hood", False)),
-            note=note_base,
+            required=bool(found_food_items.get("hood", False)),
+            note=base_note,
         )
-        add_doc(
+        add_row(
             "iecc_docs",
-            "IECC / Energy Code Compliance Documentation",
-            required=bool(found.get("iecc_energy_code", False)),
+            required=bool(found_food_items.get("iecc_energy_code", False)),
             note="Required when IECC-specific details or energy compliance are called out.",
         )
 
-    # Build summary / intake status
     missing_required = [r["document"] for r in rows if r["required"] and not r["provided"]]
 
     if missing_required:
@@ -269,8 +369,16 @@ def main():
 
     st.title("City of Buckeye – Commercial Plan Intake (Beta)")
     st.write(
-        "Use this tool to perform an initial document intake check for COMMERCIAL projects "
-        "(Shell, Ground-Up, or Tenant Improvement)."
+        "This tool helps determine whether a COMMERCIAL plan submittal is complete for intake. "
+        "It checks required documents based on project type and whether the plans show food-service features."
+    )
+
+    st.info(
+        "Step 1: Choose project type and indicate if it is food service.\n"
+        "Step 2: Upload the full plan set PDF.\n"
+        "Step 3: Upload ALL supporting documents you believe are required "
+        "(geotech report, special inspections form, hood specs, etc.).\n"
+        "Step 4: Run the intake check to verify completeness."
     )
 
     # Sidebar: configuration / API key
@@ -315,44 +423,18 @@ def main():
         type=["pdf"],
     )
 
-    st.subheader("Documents Submitted with Application")
+    st.subheader("Supporting Documents")
 
-    col1, col2, col3 = st.columns(3)
+    st.write(
+        "Upload ALL other supporting PDF documents here (geotechnical report, "
+        "special inspections form, structural calcs, hood specs, IECC docs, etc.)."
+    )
 
-    with col1:
-        completed_application = st.checkbox("Completed Permit Application", value=True)
-        arch_set = st.checkbox("Architectural Plan Set", value=True)
-        mep_set = st.checkbox("MEP Plan Set", value=True)
-        geotech_report = st.checkbox("Geotechnical Report")
-        deferred_truss_form = st.checkbox("Deferred Truss Submittal Form")
-
-    with col2:
-        special_inspections_form = st.checkbox("Special Inspections Form")
-        struct_calcs = st.checkbox("Structural Calculations")
-        struct_sheets = st.checkbox("Structural Sheets")
-        grease_interceptor = st.checkbox("Grease Interceptor Submittal/Details")
-        walk_in_cooler = st.checkbox("Walk-in Cooler Submittal/Details")
-
-    with col3:
-        walk_in_freezer = st.checkbox("Walk-in Freezer Submittal/Details")
-        hood_specs = st.checkbox("Hood Specifications / Hood Schedule")
-        iecc_docs = st.checkbox("IECC / Energy Code Compliance Docs")
-
-    docs_provided = {
-        "completed_application": completed_application,
-        "arch_set": arch_set,
-        "mep_set": mep_set,
-        "geotech_report": geotech_report,
-        "deferred_truss_form": deferred_truss_form,
-        "special_inspections_form": special_inspections_form,
-        "struct_calcs": struct_calcs,
-        "struct_sheets": struct_sheets,
-        "grease_interceptor": grease_interceptor,
-        "walk_in_cooler": walk_in_cooler,
-        "walk_in_freezer": walk_in_freezer,
-        "hood_specs": hood_specs,
-        "iecc_docs": iecc_docs,
-    }
+    support_pdfs = st.file_uploader(
+        "Supporting documents (PDF, multiple allowed)",
+        type=["pdf"],
+        accept_multiple_files=True,
+    )
 
     st.markdown("---")
 
@@ -363,28 +445,34 @@ def main():
             st.error("Please upload the full plan set PDF before running the intake check.")
             st.stop()
 
-        with st.spinner("Analyzing plans and building intake checklist..."):
-            # Save uploaded PDF to temp, extract text
+        if not support_pdfs:
+            st.warning(
+                "No supporting documents uploaded. The tool will still analyze the plans, "
+                "but most required documents will show as missing."
+            )
+
+        with st.spinner("Analyzing plans and supporting documents for intake completeness..."):
+            # --- Extract text from main plan PDF ---
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                 tmp.write(plan_pdf.read())
-                tmp_path = tmp.name
+                plan_tmp_path = tmp.name
 
             try:
-                plan_text = extract_pdf_text(tmp_path)
+                plan_text = extract_pdf_text(plan_tmp_path)
             except Exception as e:
-                st.error(f"Error extracting text from PDF: {e}")
+                st.error(f"Error extracting text from plan PDF: {e}")
                 try:
-                    os.remove(tmp_path)
+                    os.remove(plan_tmp_path)
                 except OSError:
                     pass
                 return
             finally:
                 try:
-                    os.remove(tmp_path)
+                    os.remove(plan_tmp_path)
                 except OSError:
                     pass
 
-            # Analyze food-service features via GPT
+            # --- Analyze plans for food-service features ---
             try:
                 plan_analysis = analyze_plans_for_food_service(
                     client, plan_text, project_type
@@ -393,12 +481,54 @@ def main():
                 st.error(f"Error analyzing plans with AI: {e}")
                 return
 
-            # Build intake checklist
+            # --- Analyze supporting docs and aggregate detected document types ---
+            ai_detected_docs: Dict[str, bool] = {}
+            doc_sources: Dict[str, List[str]] = {}
+
+            if support_pdfs:
+                for upload in support_pdfs:
+                    filename = upload.name
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                        tmp.write(upload.read())
+                        tmp_path = tmp.name
+
+                    try:
+                        doc_text = extract_pdf_text(tmp_path)
+                    except Exception:
+                        doc_text = ""
+                    finally:
+                        try:
+                            os.remove(tmp_path)
+                        except OSError:
+                            pass
+
+                    if not doc_text.strip():
+                        continue
+
+                    try:
+                        classification = classify_support_doc(client, doc_text, filename)
+                    except Exception:
+                        continue
+
+                    doc_types = classification.get("doc_types", {}) or {}
+                    for code, is_true in doc_types.items():
+                        if is_true:
+                            ai_detected_docs[code] = True
+                            doc_sources.setdefault(code, []).append(filename)
+
+            # For now, assume completed application, arch set, and MEP set
+            # are present with the main plan submittal (verified by intake staff).
+            ai_detected_docs.setdefault("completed_application", True)
+            ai_detected_docs.setdefault("arch_set", True)
+            ai_detected_docs.setdefault("mep_set", True)
+
+            # --- Build final intake checklist ---
             checklist = build_intake_checklist(
                 project_type=project_type,
                 is_food_service_checkbox=is_food_service_checkbox,
                 plan_analysis=plan_analysis,
-                docs_provided=docs_provided,
+                ai_detected_docs=ai_detected_docs,
+                doc_sources=doc_sources,
             )
 
         # --- Display results ---
@@ -428,7 +558,7 @@ def main():
         ]
         st.table(display_rows)
 
-        st.subheader("Plan Analysis (Food-Service Signals)")
+        st.subheader("Plan Analysis (Food-Service Signals from Plan Set)")
         st.json(checklist["plan_analysis"])
 
         st.caption(
