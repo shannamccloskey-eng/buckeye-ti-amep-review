@@ -7,7 +7,7 @@ import textwrap
 import streamlit as st
 from openai import OpenAI
 from pypdf import PdfReader
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import letter, landscape
 from reportlab.pdfgen import canvas
 
 # ---------------- CONFIG ----------------
@@ -117,15 +117,23 @@ def extract_pdf_text(pdf_path: str) -> str:
 
 def save_text_as_pdf(text: str, pdf_path: Path):
     """
-    Save a long plain-text report as a simple, formatted PDF.
+    Save a long plain-text report as a formatted PDF:
+    - Landscape Letter
+    - Smaller font (9pt)
+    - Wrapped lines for readability
     """
-    c = canvas.Canvas(str(pdf_path), pagesize=letter)
-    width, height = letter
-    left_margin = 72
-    top_margin = 72
-    bottom_margin = 72
-    max_width_chars = 100
-    line_height = 12
+    # Landscape letter
+    pagesize = landscape(letter)
+    c = canvas.Canvas(str(pdf_path), pagesize=pagesize)
+    width, height = pagesize
+
+    # Margins and typography
+    left_margin = 50
+    top_margin = 40
+    bottom_margin = 40
+    font_size = 9  # slightly smaller font for dense reports
+    line_height = font_size + 2  # 11pt leading
+    max_width_chars = 140  # wider lines for landscape
 
     lines = []
     for raw_line in text.splitlines():
@@ -136,12 +144,12 @@ def save_text_as_pdf(text: str, pdf_path: Path):
             lines.extend(wrapped)
 
     y = height - top_margin
-    c.setFont("Helvetica", 10)
+    c.setFont("Helvetica", font_size)
 
     for line in lines:
         if y < bottom_margin:
             c.showPage()
-            c.setFont("Helvetica", 10)
+            c.setFont("Helvetica", font_size)
             y = height - top_margin
         c.drawString(left_margin, y, line)
         y -= line_height
@@ -205,8 +213,6 @@ def call_buckeye_ti_amep_single(
         model=MODEL_NAME,
         instructions=CITY_OF_BUCKEYE_INSTRUCTIONS,
         input=user_prompt,
-        # Optional: you can bound max_output_tokens if you want
-        # max_output_tokens=4000,
     )
     usage_dict = _extract_usage_dict(response)
     return response.output_text, usage_dict
@@ -224,12 +230,11 @@ def run_review_pipeline_single(
     if not pdf_text.strip():
         raise ValueError("No extractable text found in PDF.")
 
-    # Simple safety cap: avoid sending an absurdly large prompt that could hang or be rejected.
-    # Roughly, 800,000 characters ~ 200k tokens for English text (very rough).
+    # Safety cap to avoid absurdly large prompts
     if len(pdf_text) > 800_000:
         raise ValueError(
             "PDF text is very large. For now, please test with a smaller TI PDF "
-            "or split the document. (Chunking has been disabled by request.)"
+            "or split the document. (Chunking has been disabled in this version.)"
         )
 
     review_text, usage = call_buckeye_ti_amep_single(
@@ -303,26 +308,30 @@ def main():
             st.error("Please upload a PDF file before running the review.")
             st.stop()
 
-        with st.spinner("Running TI AMEP Review (single-pass, no chunking)..."):
-            # Save uploaded file to a temp path
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                tmp.write(uploaded_file.read())
-                tmp_path = tmp.name
+        # Progress bar + status text
+        progress_bar = st.progress(0)
+        status_placeholder = st.empty()
 
-            try:
-                review_text, usage_summary = run_review_pipeline_single(
-                    client,
-                    tmp_path,
-                    project_description.strip() or None,
-                )
-            except Exception as e:
-                st.error(f"Error during review: {e}")
-                return
-            finally:
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
+        progress_bar.progress(5)
+        status_placeholder.text("Starting TI AMEP review...")
+
+        # Save uploaded file to a temp path
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(uploaded_file.read())
+            tmp_path = tmp.name
+
+        try:
+            progress_bar.progress(25)
+            status_placeholder.text("Extracting text and preparing review request...")
+
+            review_text, usage_summary = run_review_pipeline_single(
+                client,
+                tmp_path,
+                project_description.strip() or None,
+            )
+
+            progress_bar.progress(70)
+            status_placeholder.text("Generating review PDF...")
 
             # Generate review PDF in temp file
             with tempfile.NamedTemporaryFile(delete=False, suffix="_buckeye_ti_amep_review.pdf") as out_tmp:
@@ -335,6 +344,22 @@ def main():
 
             try:
                 os.remove(out_pdf_path)
+            except OSError:
+                pass
+
+            progress_bar.progress(100)
+            status_placeholder.text("TI AMEP review complete.")
+
+        except Exception as e:
+            st.error(f"Error during review: {e}")
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            return
+        finally:
+            try:
+                os.remove(tmp_path)
             except OSError:
                 pass
 
@@ -363,3 +388,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
