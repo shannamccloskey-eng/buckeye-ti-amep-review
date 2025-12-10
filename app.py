@@ -202,14 +202,14 @@ def save_text_as_pdf(text: str, pdf_path: Path):
     Save review text as a formatted PDF:
     - Landscape Letter
     - Body text as paragraphs
-    - Discrepancy Table rendered as a real table if markdown table is found
+    - Discrepancy Table rendered as a real table with wrapped cell text
     """
     # Prepare lines
     all_lines = text.splitlines()
 
     # Try to extract markdown discrepancy table
     pre_lines, table_lines, post_lines = _extract_markdown_table(all_lines)
-    table_data = _markdown_table_to_data(table_lines) if table_lines else []
+    table_data_raw = _markdown_table_to_data(table_lines) if table_lines else []
 
     # Landscape letter document
     pagesize = landscape(letter)
@@ -233,30 +233,48 @@ def save_text_as_pdf(text: str, pdf_path: Path):
     heading_style.fontSize = 11
     heading_style.leading = 14
 
+    # Style for table cells (this is the key piece for wrapping)
+    from reportlab.lib.styles import ParagraphStyle
+    table_cell_style = ParagraphStyle(
+        "TableCell",
+        parent=body_style,
+        fontName="Helvetica",
+        fontSize=8,
+        leading=10,
+    )
+
     story: List[Any] = []
 
-    # Preamble paragraphs
+    # Helper to turn lines into paragraphs
     pre_paragraphs = _split_paragraphs_from_lines(pre_lines)
     for para_text in pre_paragraphs:
         story.append(Paragraph(para_text, body_style))
         story.append(Spacer(1, 3 * mm))
 
     # Discrepancy Table, if present
-    if table_data:
+    if table_data_raw:
         story.append(Spacer(1, 4 * mm))
         story.append(Paragraph("Discrepancy Table", heading_style))
         story.append(Spacer(1, 2 * mm))
 
-        # If header row has 5 cols, we assume the expected structure
+        # Convert every cell to a Paragraph so it wraps inside its column
+        table_data: List[List[Any]] = []
+        for row in table_data_raw:
+            table_row: List[Any] = []
+            for cell in row:
+                cell_text = cell if cell is not None else ""
+                table_row.append(Paragraph(cell_text, table_cell_style))
+            table_data.append(table_row)
+
+        # If header row has 5 cols, assume expected structure
         col_widths = None
         if len(table_data[0]) == 5:
-            # Compute column widths proportionally
             page_width = pagesize[0]
             effective_width = page_width - doc.leftMargin - doc.rightMargin
             col_widths = [
                 0.12 * effective_width,  # Sheet Reference
                 0.12 * effective_width,  # Discipline
-                0.36 * effective_width,  # Description
+                0.36 * effective_width,  # Description of Issue
                 0.12 * effective_width,  # Code Section
                 0.28 * effective_width,  # Required Correction
             ]
@@ -264,12 +282,14 @@ def save_text_as_pdf(text: str, pdf_path: Path):
         tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
         tbl_style = TableStyle(
             [
-                ("GRID", (0, 0), (-1, -1), 0.25, 0),  # thin grid, default color
+                ("GRID", (0, 0), (-1, -1), 0.25, 0),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),  # header row
                 ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
                 ("FONTSIZE", (0, 0), (-1, -1), 8),
                 ("LEADING", (0, 0), (-1, -1), 10),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
             ]
         )
         tbl.setStyle(tbl_style)
@@ -286,6 +306,14 @@ def save_text_as_pdf(text: str, pdf_path: Path):
 
     # Build the document
     doc.build(story)
+
+
+
+
+
+
+
+
 
 # ---------------- OPENAI HELPERS ----------------
 
