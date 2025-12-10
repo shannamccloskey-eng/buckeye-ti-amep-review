@@ -1,14 +1,18 @@
 import os
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import tempfile
 import textwrap
 
 import streamlit as st
 from openai import OpenAI
 from pypdf import PdfReader
+
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.pdfgen import canvas
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import mm
 
 # ---------------- CONFIG ----------------
 
@@ -80,8 +84,9 @@ E. Fire & Life Safety (IFC 2024 + IBC Ch. 9)
 STEP 3 — Discrepancy Table
 - Produce a table with columns:
   Sheet Reference | Discipline | Description of Issue | Code Section | Required Correction.
-- If the sheet reference is unknown from the excerpt, indicate "N/A" or
-  "Not Shown".
+- You MUST format the Discrepancy Table as a markdown table with this exact header row:
+  | Sheet Reference | Discipline | Description of Issue | Code Section | Required Correction |
+- If the sheet reference is unknown from the excerpt, indicate "N/A" or "Not Shown".
 
 STEP 4 — EnerGov-Compatible Comments
 - Format each comment as:
@@ -119,60 +124,168 @@ def extract_pdf_text(pdf_path: str) -> str:
         all_text.append(page_text)
     return "\n\n".join(all_text)
 
+def _split_paragraphs_from_lines(lines: List[str]) -> List[str]:
+    """
+    Turn a list of lines into paragraphs separated by blank lines.
+    """
+    paragraphs = []
+    buffer: List[str] = []
+    for line in lines:
+        if line.strip() == "":
+            if buffer:
+                paragraphs.append(" ".join(buffer).strip())
+                buffer = []
+        else:
+            buffer.append(line.strip())
+    if buffer:
+        paragraphs.append(" ".join(buffer).strip())
+    return paragraphs
+
+def _extract_markdown_table(lines: List[str]) -> (List[str], List[str], List[str]):
+    """
+    Find a markdown table that starts with the header row containing:
+    '| Sheet Reference | Discipline | Description of Issue | Code Section | Required Correction |'
+    and return (pre_lines, table_lines, post_lines).
+    If no table found, table_lines will be empty and all text is in pre_lines+post_lines.
+    """
+    header_substring = "Sheet Reference | Discipline | Description of Issue | Code Section | Required Correction"
+    start_idx = None
+
+    for i, line in enumerate(lines):
+        if header_substring in line:
+            start_idx = i
+            break
+
+    if start_idx is None:
+        # No table found
+        return lines, [], []
+
+    table_lines = []
+    i = start_idx
+    while i < len(lines):
+        line = lines[i]
+        if "|" in line and line.strip():
+            table_lines.append(line)
+            i += 1
+        else:
+            break
+
+    pre_lines = lines[:start_idx]
+    post_lines = lines[i:]
+
+    return pre_lines, table_lines, post_lines
+
+def _markdown_table_to_data(table_lines: List[str]) -> List[List[str]]:
+    """
+    Convert markdown table lines into a list-of-lists for ReportLab Table.
+    Skips separator rows like '|---|---|...|'.
+    """
+    data: List[List[str]] = []
+    for line in table_lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Skip separator line
+        # e.g.: | --- | --- | ... |
+        no_bars = stripped.replace("|", "").replace(":", "").replace("-", "").strip()
+        if no_bars == "":
+            continue
+
+        # Split into cells
+        parts = stripped.strip("|").split("|")
+        row = [cell.strip() for cell in parts]
+        data.append(row)
+    return data
+
 def save_text_as_pdf(text: str, pdf_path: Path):
     """
-    Save a long plain-text report as a formatted PDF:
+    Save review text as a formatted PDF:
     - Landscape Letter
-    - Monospaced font (Courier) for better alignment, especially tables
-    - Smaller font (9pt)
-    - Slight extra spacing before key sections like 'Discrepancy Table'
+    - Body text as paragraphs
+    - Discrepancy Table rendered as a real table if markdown table is found
     """
-    # Landscape letter
+    # Prepare lines
+    all_lines = text.splitlines()
+
+    # Try to extract markdown discrepancy table
+    pre_lines, table_lines, post_lines = _extract_markdown_table(all_lines)
+    table_data = _markdown_table_to_data(table_lines) if table_lines else []
+
+    # Landscape letter document
     pagesize = landscape(letter)
-    c = canvas.Canvas(str(pdf_path), pagesize=pagesize)
-    width, height = pagesize
+    doc = SimpleDocTemplate(
+        str(pdf_path),
+        pagesize=pagesize,
+        leftMargin=20 * mm,
+        rightMargin=20 * mm,
+        topMargin=15 * mm,
+        bottomMargin=15 * mm,
+    )
 
-    # Margins and typography
-    left_margin = 40
-    top_margin = 40
-    bottom_margin = 40
-    font_size = 9  # slightly smaller font for dense reports
-    line_height = font_size + 3  # small leading
-    max_width_chars = 140  # wider lines for landscape
+    styles = getSampleStyleSheet()
+    body_style = styles["Normal"]
+    body_style.fontName = "Helvetica"
+    body_style.fontSize = 9
+    body_style.leading = 11
 
-    # Build lines with some extra handling around key sections/headings
-    lines = []
-    for raw_line in text.splitlines():
-        stripped = raw_line.rstrip("\n")
-        if stripped.strip() == "":
-            lines.append("")
-            continue
+    heading_style = styles["Heading3"]
+    heading_style.fontName = "Helvetica-Bold"
+    heading_style.fontSize = 11
+    heading_style.leading = 14
 
-        upper = stripped.upper()
+    story: List[Any] = []
 
-        # Add extra spacing before key sections, if present
-        if "DISCREPANCY TABLE" in upper or "ENERGOV" in upper:
-            lines.append("")  # blank line before heading
-            # Keep heading itself as a single line, not wrapped
-            lines.append(stripped)
-            continue
+    # Preamble paragraphs
+    pre_paragraphs = _split_paragraphs_from_lines(pre_lines)
+    for para_text in pre_paragraphs:
+        story.append(Paragraph(para_text, body_style))
+        story.append(Spacer(1, 3 * mm))
 
-        # For everything else, wrap to max_width_chars
-        wrapped = textwrap.wrap(stripped, max_width_chars) or [""]
-        lines.extend(wrapped)
+    # Discrepancy Table, if present
+    if table_data:
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph("Discrepancy Table", heading_style))
+        story.append(Spacer(1, 2 * mm))
 
-    y = height - top_margin
-    c.setFont("Courier", font_size)  # monospaced for better table readability
+        # If header row has 5 cols, we assume the expected structure
+        col_widths = None
+        if len(table_data[0]) == 5:
+            # Compute column widths proportionally
+            page_width = pagesize[0]
+            effective_width = page_width - doc.leftMargin - doc.rightMargin
+            col_widths = [
+                0.12 * effective_width,  # Sheet Reference
+                0.12 * effective_width,  # Discipline
+                0.36 * effective_width,  # Description
+                0.12 * effective_width,  # Code Section
+                0.28 * effective_width,  # Required Correction
+            ]
 
-    for line in lines:
-        if y < bottom_margin:
-            c.showPage()
-            c.setFont("Courier", font_size)
-            y = height - top_margin
-        c.drawString(left_margin, y, line)
-        y -= line_height
+        tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
+        tbl_style = TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.25, 0),  # thin grid, default color
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("LEADING", (0, 0), (-1, -1), 10),
+            ]
+        )
+        tbl.setStyle(tbl_style)
+        story.append(tbl)
+        story.append(Spacer(1, 5 * mm))
 
-    c.save()
+    # Post-table paragraphs
+    post_paragraphs = _split_paragraphs_from_lines(post_lines)
+    if post_paragraphs:
+        story.append(Spacer(1, 4 * mm))
+        for para_text in post_paragraphs:
+            story.append(Paragraph(para_text, body_style))
+            story.append(Spacer(1, 3 * mm))
+
+    # Build the document
+    doc.build(story)
 
 # ---------------- OPENAI HELPERS ----------------
 
@@ -222,6 +335,8 @@ def call_buckeye_ti_amep_single(
         "- Treat this as the full TI plan set text extracted from the PDF.\n"
         "- Identify discrepancies, missing information, and code issues.\n"
         "- Produce a discrepancy table and EnerGov-compatible comments.\n"
+        "- You MUST format the Discrepancy Table as a markdown table with the header:\n"
+        "  | Sheet Reference | Discipline | Description of Issue | Code Section | Required Correction |\n"
         "- If specific sheet numbers are not visible, use 'N/A' or 'Not Shown'.\n\n"
         "FULL PDF TEXT:\n"
         f"{full_pdf_text}"
@@ -365,7 +480,7 @@ def main():
             )
 
             progress_bar.progress(70)
-            status_placeholder.text("Generating review PDF (landscape, formatted)...")
+            status_placeholder.text("Generating formatted review PDF...")
 
             # Generate review PDF in temp file
             with tempfile.NamedTemporaryFile(delete=False, suffix="_buckeye_ti_amep_review.pdf") as out_tmp:
