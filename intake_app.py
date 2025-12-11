@@ -522,7 +522,7 @@ def main():
             ai_detected_docs.setdefault("arch_set", True)
             ai_detected_docs.setdefault("mep_set", True)
 
-            # --- Build final intake checklist ---
+            # --- Build final intake checklist... ---
             checklist = build_intake_checklist(
                 project_type=project_type,
                 is_food_service_checkbox=is_food_service_checkbox,
