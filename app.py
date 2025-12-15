@@ -471,7 +471,7 @@ def main():
 
     st.sidebar.markdown(f"**Model:** `{MODEL_NAME}`")
 
-    uploaded_file = st.file_uploader("Upload TI Plan Set (PDF)", type=["pdf"])
+    uploaded_file = st.file_uploader("Upload TI Plan Set (PDF)", type=["pdf"],accept_multiple_files=True,)
 
     project_description = st.text_area(
         "Optional project description",
