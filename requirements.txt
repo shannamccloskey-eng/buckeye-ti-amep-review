@@ -2,4 +2,8 @@ streamlit
 openai
 tiktoken
 pypdf
+
 reportlab
+pdf2image
+pytesseract
+pillow
