@@ -16,113 +16,146 @@ from reportlab.lib.units import mm
 
 # ---------------- CONFIG ----------------
 
-MODEL_NAME = "gpt-5.1"  # OpenAI API model ID
+MODEL_NAME = "gpt-4.1"  # or your preferred model
 
-# Pricing for GPT-5.1 text tokens (per 1M tokens) – from OpenAI docs
-GPT51_INPUT_PRICE_PER_M = 1.25   # USD per 1M input tokens
-GPT51_OUTPUT_PRICE_PER_M = 10.0  # USD per 1M output tokens
+# GPT-5.1 pricing assumptions (example values – adjust to your actual pricing)
+GPT51_INPUT_PRICE_PER_M = 15.00  # USD per 1M input tokens
+GPT51_OUTPUT_PRICE_PER_M = 60.00  # USD per 1M output tokens
 
-CITY_OF_BUCKEYE_INSTRUCTIONS = """
-You are "City of Buckeye CB3PO". You represent the City of Buckeye Building
-Safety / Building Department and serve as a Building Safety Plans Examiner.
 
-SCOPE:
-You are performing Architectural, Mechanical, Electrical, Plumbing (AMEP) plan
-reviews specifically for Tenant Improvement (TI) projects only.
+# ---------------- OPENAI CLIENT ----------------
 
-ADOPTED CODES (reference only; do NOT quote text):
+def get_client(api_key: str) -> OpenAI:
+    """
+    Create an OpenAI client with the given API key.
+    """
+    return OpenAI(api_key=api_key)
+
+
+# ---------------- PROMPT ----------------
+
+BUCKEYE_TI_AMEP_PROMPT = """
+You are a City of Buckeye Building Safety Plans Examiner performing an
+Architectural, Mechanical, Electrical, Plumbing (AMEP) plan review for a
+Tenant Improvement (TI) project within an existing building.
+
+Review the uploaded TI plan set and provide:
+1. A brief project scope summary.
+2. A structured discrepancy table.
+3. EnerGov-compatible comments.
+4. A clear final determination (Approved, Approved with Comments, or Corrections Required).
+
+Only use the following codes (by exact name and year) for references:
 - 2024 International Building Code (IBC)
 - 2024 International Mechanical Code (IMC)
 - 2024 International Plumbing Code (IPC)
 - 2024 International Fire Code (IFC)
 - 2017 ICC A117.1
+- 2023 National Electrical Code (NEC, NFPA 70)
 - 2018 International Energy Conservation Code (IECC)
-- 2023 National Electrical Code (NEC / NFPA 70)
-- ADA Standards for Accessible Design
+- 2010 ADA Standards for Accessible Design (ADA)
 - City of Buckeye Amendments
 
-TI AMEP REVIEW WORKFLOW (Run TI AMEP Review):
+Do NOT quote code text verbatim.
+You may cite code sections as, for example, "IBC 2024 §1005.3".
 
-STEP 1 — Identify Project Scope
-- Confirm the project is a Tenant Improvement (TI).
-- Classify the review into: Architectural, Mechanical, Electrical, Plumbing,
-  Fire, Accessibility, and Energy.
+Organize your review into these disciplines:
+- Architectural
+- Mechanical
+- Electrical
+- Plumbing
+- Fire & Life Safety
+- Accessibility
+- Energy
 
-STEP 2 — Conduct Full AMEP Review
+The discrepancy table must be in GitHub-flavored Markdown format with **exactly**
+the following columns in this order:
 
-A. Architectural (IBC 2024, IFC 2024, IECC 2018)
-- Confirm occupancy classification, construction type, fire-resistance and
-  required separations.
-- Verify means of egress, occupant load, exit signs, emergency lighting,
-  door hardware, corridor ratings (if required).
-- Review restrooms, accessibility, finishes, fire protection coordination,
-  and energy-related envelope items as applicable to a TI.
+| Sheet Reference | Discipline | Description of Issue | Code Section | Required Correction |
 
-B. Mechanical (IMC 2024 + IECC 2018)
-- Check ventilation and outside air, exhaust, duct construction and routing,
-  fire/smoke dampers where required, and equipment access/clearances.
-- Verify controls and any energy code-related mechanical provisions.
+Each discrepancy row should:
+- Reference at least one specific plan sheet (if possible).
+- Include at least one specific code section (if possible).
+- Clearly state a concise required correction in inspector language.
 
-C. Plumbing (IPC 2024 + ADA + ICC A117.1-2017)
-- Verify plumbing fixture counts for occupancy, fixture locations, accessible
-  fixtures, clearances, grab bars, lavatories, and water closets.
-- Check water supply, drainage, venting, backflow prevention, indirect waste,
-  grease interceptors (if applicable), and water heater safety.
+For EnerGov-compatible comments, use this format, one per line:
+[Discipline] – [Code Reference]: [Required Correction].
 
-D. Electrical (NEC 2023 + IECC + ADA/A117.1)
-- Confirm branch circuits, overcurrent protection, panel schedules,
-  grounding/bonding, receptacle spacing where relevant, and coordination with
-  mechanical and plumbing equipment.
-- Verify egress lighting, exit signage power, lighting controls, and any
-  energy code requirements for lighting.
+For example:
+Architectural – IBC 2024 §1005.3: Provide compliant egress width based on occupant load.
 
-E. Fire & Life Safety (IFC 2024 + IBC Ch. 9)
-- Coordinate sprinkler and fire alarm design (if provided) with TI layout.
-- Check egress lighting, exit signs, fire-extinguisher locations, and
-  hazardous materials (if any).
-
-STEP 3 — Discrepancy Table
-- Produce a table with columns:
-  Sheet Reference | Discipline | Description of Issue | Code Section | Required Correction.
-- You MUST format the Discrepancy Table as a markdown table with this exact header row:
-  | Sheet Reference | Discipline | Description of Issue | Code Section | Required Correction |
-- If the sheet reference is unknown from the excerpt, indicate "N/A" or "Not Shown".
-
-STEP 4 — EnerGov-Compatible Comments
-- Format each comment as:
-  [Discipline] – [Code Reference]: [Required Correction].
-  Example: Architectural – IBC 2024 §1005.3: Provide compliant egress width
-  based on occupant load.
-
-STEP 5 — Final Summary & Determination
-- Provide one of:
-  - Approved
-  - Approved with Comments
-  - Corrections Required.
-- Include the closing statement:
+Finish with a Final Summary & Determination, including:
+- "Determination: Approved", "Approved with Comments", or "Corrections Required".
+- A brief closing statement:
   "Review performed in accordance with the 2024 IBC, IMC, IPC, IFC,
-   2017 ICC A117.1, 2023 NEC, 2018 IECC, ADA Standards, and City of
-   Buckeye Amendments. All cited code sections are publicly available
-   on ICCsafe.org, ADA.gov, and NFPA.org."
+   2017 ICC A117.1, 2023 NEC, 2018 IECC, ADA Standards, and City of Buckeye Amendments."
 
-GENERAL BEHAVIOR:
-- Tone: professional, concise, and authoritative; municipal plan review style.
-- Do NOT quote or reproduce code text; cite section numbers only.
-- Focus ONLY on TI AMEP scope; do not perform structural or geotechnical review.
+Tone: professional, concise, authoritative.
+Avoid casual language or conversational fillers.
 """
+
 
 # ---------------- PDF UTILITIES ----------------
 
 def extract_pdf_text(pdf_path: str) -> str:
     """
     Extract text from all pages of a PDF.
+
+    1. Try direct text extraction with pypdf (for digital/searchable PDFs).
+    2. If that fails (e.g., scanned/image-only PDFs), fall back to OCR using
+       pdf2image + pytesseract, if installed.
     """
+    # --- First pass: normal text extraction ---
     reader = PdfReader(pdf_path)
-    all_text = []
+    all_text: List[str] = []
+
     for page in reader.pages:
         page_text = page.extract_text() or ""
-        all_text.append(page_text)
-    return "\n\n".join(all_text)
+        if page_text.strip():
+            all_text.append(page_text)
+
+    text = "\n\n".join(all_text).strip()
+    if text:
+        return text
+
+    # --- Fallback: OCR for scanned/image PDFs ---
+    try:
+        from pdf2image import convert_from_path
+        import pytesseract
+    except ImportError:
+        # OCR libraries not available
+        raise ValueError(
+            "No extractable text found in PDF, and OCR dependencies "
+            "(pdf2image, pytesseract) are not installed. "
+            "Install these packages or upload a text/searchable PDF."
+        )
+
+    try:
+        # Convert PDF pages to images (300 dpi is a good OCR baseline)
+        images = convert_from_path(pdf_path, dpi=300)
+    except Exception as e:
+        raise ValueError(
+            f"No extractable text found in PDF, and image conversion for OCR failed: {e}"
+        )
+
+    ocr_chunks: List[str] = []
+    for img in images:
+        try:
+            ocr_chunks.append(pytesseract.image_to_string(img))
+        except Exception:
+            # Skip any page that fails OCR, continue with others
+            continue
+
+    ocr_text = "\n\n".join(ocr_chunks).strip()
+    if not ocr_text:
+        raise ValueError(
+            "No extractable text found in PDF, even after OCR. "
+            "This appears to be a low-quality scan. Please upload a "
+            "higher-quality or text-based plan set."
+        )
+
+    return ocr_text
+
 
 def _split_paragraphs_from_lines(lines: List[str]) -> List[str]:
     """
@@ -141,70 +174,89 @@ def _split_paragraphs_from_lines(lines: List[str]) -> List[str]:
         paragraphs.append(" ".join(buffer).strip())
     return paragraphs
 
-def _extract_markdown_table(lines: List[str]) -> (List[str], List[str], List[str]):
-    """
-    Find a markdown table that starts with the header row containing:
-    '| Sheet Reference | Discipline | Description of Issue | Code Section | Required Correction |'
-    and return (pre_lines, table_lines, post_lines).
-    If no table found, table_lines will be empty and all text is in pre_lines+post_lines.
-    """
-    header_substring = "Sheet Reference | Discipline | Description of Issue | Code Section | Required Correction"
-    start_idx = None
 
-    for i, line in enumerate(lines):
-        if header_substring in line:
-            start_idx = i
+def _extract_markdown_table(
+    all_lines: List[str],
+    header_prefix: str = "| Sheet Reference",
+) -> (List[str], List[str], List[str]):
+    """
+    Given a list of lines, attempt to locate the discrepancy table in Markdown.
+    We look for a header starting with `header_prefix` and capture from there
+    through the end of a Markdown table.
+    """
+    header_index = None
+    for i, line in enumerate(all_lines):
+        if line.strip().startswith(header_prefix):
+            header_index = i
             break
 
-    if start_idx is None:
-        # No table found
-        return lines, [], []
+    if header_index is None:
+        return all_lines, [], []
 
-    table_lines = []
-    i = start_idx
-    while i < len(lines):
-        line = lines[i]
-        if "|" in line and line.strip():
+    table_lines: List[str] = []
+    table_started = False
+
+    for line in all_lines[header_index:]:
+        stripped = line.strip()
+        if stripped.startswith("|") and "|" in stripped:
             table_lines.append(line)
-            i += 1
+            table_started = True
         else:
-            break
+            if table_started:
+                # End of table
+                break
 
-    pre_lines = lines[:start_idx]
-    post_lines = lines[i:]
+    pre_lines = all_lines[:header_index]
+    post_start = header_index + len(table_lines)
+    post_lines = all_lines[post_start:]
 
     return pre_lines, table_lines, post_lines
 
+
 def _markdown_table_to_data(table_lines: List[str]) -> List[List[str]]:
     """
-    Convert markdown table lines into a list-of-lists for ReportLab Table.
-    Skips separator rows like '|---|---|...|'.
+    Convert a minimal GFM-style table into a list-of-lists of cell text.
+    We ignore the alignment row like:
+    | --- | --- | --- |
     """
-    data: List[List[str]] = []
-    for line in table_lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        # Skip separator line
-        # e.g.: | --- | --- | ... |
-        no_bars = stripped.replace("|", "").replace(":", "").replace("-", "").strip()
-        if no_bars == "":
-            continue
+    if not table_lines:
+        return []
 
-        # Split into cells
-        parts = stripped.strip("|").split("|")
-        row = [cell.strip() for cell in parts]
-        data.append(row)
-    return data
+    lines = [ln for ln in table_lines if ln.strip()]
+    if len(lines) < 2:
+        return []
 
-def save_text_as_pdf(text: str, pdf_path: Path):
+    header = lines[0]
+    data_lines = lines[1:]
+
+    table_data: List[List[str]] = []
+    for i, line in enumerate(data_lines):
+        if set(line.strip()) <= {"|", "-", " "}:
+            # alignment row, skip
+            continue
+        row_cells = [cell.strip() for cell in line.split("|")]
+        # Remove empty cells from leading/trailing splits
+        while row_cells and row_cells[0] == "":
+            row_cells.pop(0)
+        while row_cells and row_cells[-1] == "":
+            row_cells.pop()
+        if row_cells:
+            table_data.append(row_cells)
+
+    return table_data
+
+
+def save_text_as_pdf(text: str, pdf_path: Path) -> None:
     """
-    Save review text as a formatted PDF:
-    - Landscape Letter
-    - Body text as paragraphs
-    - Discrepancy Table rendered as a real table with wrapped cell text
+    Create a landscape-letter PDF containing the review text, plus any
+    Markdown discrepancy table rendered as a simple table.
     """
-    # Prepare lines
+    # Prepare styles
+    stylesheet = getSampleStyleSheet()
+    normal_style = stylesheet["Normal"]
+    heading_style = stylesheet["Heading2"]
+
+    # Split the text into lines so we can look for the discrepancy table
     all_lines = text.splitlines()
 
     # Try to extract markdown discrepancy table
@@ -222,125 +274,61 @@ def save_text_as_pdf(text: str, pdf_path: Path):
         bottomMargin=15 * mm,
     )
 
-    styles = getSampleStyleSheet()
-    body_style = styles["Normal"]
-    body_style.fontName = "Helvetica"
-    body_style.fontSize = 9
-    body_style.leading = 11
-
-    heading_style = styles["Heading3"]
-    heading_style.fontName = "Helvetica-Bold"
-    heading_style.fontSize = 11
-    heading_style.leading = 14
-
-    # Style for table cells (this is the key piece for wrapping)
-    from reportlab.lib.styles import ParagraphStyle
-    table_cell_style = ParagraphStyle(
-        "TableCell",
-        parent=body_style,
-        fontName="Helvetica",
-        fontSize=8,
-        leading=10,
-    )
-
     story: List[Any] = []
 
-    # Helper to turn lines into paragraphs
-    pre_paragraphs = _split_paragraphs_from_lines(pre_lines)
-    for para_text in pre_paragraphs:
-        story.append(Paragraph(para_text, body_style))
+    # 1) Everything before the table as paragraphs
+    pre_text = "\n".join(pre_lines).strip()
+    if pre_text:
+        for para in _split_paragraphs_from_lines(pre_text.splitlines()):
+            story.append(Paragraph(para, normal_style))
+            story.append(Spacer(1, 4 * mm))
+
+    # 2) Discrepancy table (if any)
+    if table_data_raw:
+        story.append(Spacer(1, 6 * mm))
+        story.append(Paragraph("Discrepancy Table", heading_style))
         story.append(Spacer(1, 3 * mm))
 
-    # Discrepancy Table, if present
-    if table_data_raw:
-        story.append(Spacer(1, 4 * mm))
-        story.append(Paragraph("Discrepancy Table", heading_style))
-        story.append(Spacer(1, 2 * mm))
+        # Optionally clamp overly long cells for PDF readability
+        max_cell_length = 350
 
-        # Convert every cell to a Paragraph so it wraps inside its column
-        table_data: List[List[Any]] = []
+        processed_rows: List[List[str]] = []
         for row in table_data_raw:
-            table_row: List[Any] = []
+            new_row: List[str] = []
             for cell in row:
-                cell_text = cell if cell is not None else ""
-                table_row.append(Paragraph(cell_text, table_cell_style))
-            table_data.append(table_row)
+                if len(cell) > max_cell_length:
+                    cell = cell[: max_cell_length - 3] + "..."
+                new_row.append(cell)
+            processed_rows.append(new_row)
 
-        # If header row has 5 cols, assume expected structure
-        col_widths = None
-        if len(table_data[0]) == 5:
-            page_width = pagesize[0]
-            effective_width = page_width - doc.leftMargin - doc.rightMargin
-            col_widths = [
-                0.12 * effective_width,  # Sheet Reference
-                0.12 * effective_width,  # Discipline
-                0.36 * effective_width,  # Description of Issue
-                0.12 * effective_width,  # Code Section
-                0.28 * effective_width,  # Required Correction
-            ]
-
-        tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
-        tbl_style = TableStyle(
-            [
-                ("GRID", (0, 0), (-1, -1), 0.25, 0),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),  # header row
-                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-                ("FONTSIZE", (0, 0), (-1, -1), 8),
-                ("LEADING", (0, 0), (-1, -1), 10),
-                ("TOPPADDING", (0, 0), (-1, -1), 2),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-            ]
+        table = Table(processed_rows, repeatRows=1)
+        table.setStyle(
+            TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.5, "black"),
+                    ("BACKGROUND", (0, 0), (-1, 0), "#DDDDDD"),
+                    ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                ]
+            )
         )
-        tbl.setStyle(tbl_style)
-        story.append(tbl)
-        story.append(Spacer(1, 5 * mm))
+        story.append(table)
+        story.append(Spacer(1, 6 * mm))
 
-    # Post-table paragraphs
-    post_paragraphs = _split_paragraphs_from_lines(post_lines)
-    if post_paragraphs:
-        story.append(Spacer(1, 4 * mm))
-        for para_text in post_paragraphs:
-            story.append(Paragraph(para_text, body_style))
-            story.append(Spacer(1, 3 * mm))
+    # 3) Everything after the table as normal paragraphs
+    post_text = "\n".join(post_lines).strip()
+    if post_text:
+        for para in _split_paragraphs_from_lines(post_text.splitlines()):
+            story.append(Paragraph(para, normal_style))
+            story.append(Spacer(1, 4 * mm))
 
-    # Build the document
     doc.build(story)
 
 
-
-
-
-
-
-
-
-# ---------------- OPENAI HELPERS ----------------
-
-def get_client(api_key: str) -> OpenAI:
-    return OpenAI(api_key=api_key)
-
-def _extract_usage_dict(response) -> Dict[str, Any]:
-    usage_dict: Dict[str, Any] = {}
-    usage = getattr(response, "usage", None)
-    if usage is None:
-        return usage_dict
-
-    keys = [
-        "input_tokens",
-        "output_tokens",
-        "reasoning_tokens",
-        "total_tokens",
-        "prompt_tokens",
-        "completion_tokens",
-    ]
-    for key in keys:
-        val = getattr(usage, key, None)
-        if val is None and isinstance(usage, dict):
-            val = usage.get(key)
-        if val is not None:
-            usage_dict[key] = val
-    return usage_dict
+# ---------------- OPENAI CALL ----------------
 
 def call_buckeye_ti_amep_single(
     client: OpenAI,
@@ -348,35 +336,47 @@ def call_buckeye_ti_amep_single(
     project_description: Optional[str],
 ) -> (str, Dict[str, Any]):
     """
-    Single OpenAI call for the entire extracted PDF text (no chunking).
+    Send the full PDF text to the model in a single prompt, returning
+    both the AI-written review and usage metadata.
     """
-    project_line = ""
+    system_message = BUCKEYE_TI_AMEP_PROMPT
+
     if project_description:
-        project_line = f"PROJECT DESCRIPTION (TI): {project_description}\n\n"
+        user_content = (
+            "PROJECT DESCRIPTION:\n"
+            f"{project_description}\n\n"
+            "FULL TI PLAN SET TEXT EXTRACT:\n"
+            f"{full_pdf_text}"
+        )
+    else:
+        user_content = (
+            "FULL TI PLAN SET TEXT EXTRACT:\n"
+            f"{full_pdf_text}"
+        )
 
-    user_prompt = (
-        "Run TI AMEP Review for this Tenant Improvement (TI) permit submittal.\n"
-        "You are performing Architectural, Mechanical, Electrical, Plumbing, Fire, "
-        "Accessibility, and Energy review only, per your TI AMEP workflow.\n\n"
-        f"{project_line}"
-        "REVIEW REQUIREMENTS:\n"
-        "- Treat this as the full TI plan set text extracted from the PDF.\n"
-        "- Identify discrepancies, missing information, and code issues.\n"
-        "- Produce a discrepancy table and EnerGov-compatible comments.\n"
-        "- You MUST format the Discrepancy Table as a markdown table with the header:\n"
-        "  | Sheet Reference | Discipline | Description of Issue | Code Section | Required Correction |\n"
-        "- If specific sheet numbers are not visible, use 'N/A' or 'Not Shown'.\n\n"
-        "FULL PDF TEXT:\n"
-        f"{full_pdf_text}"
-    )
-
-    response = client.responses.create(
+    response = client.chat.completions.create(
         model=MODEL_NAME,
-        instructions=CITY_OF_BUCKEYE_INSTRUCTIONS,
-        input=user_prompt,
+        messages=[
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_content},
+        ],
+        temperature=0.2,
     )
-    usage_dict = _extract_usage_dict(response)
-    return response.output_text, usage_dict
+
+    review_text = response.choices[0].message.content or ""
+    usage_data = {
+        "input_tokens": response.usage.prompt_tokens,
+        "output_tokens": response.usage.completion_tokens,
+        "total_tokens": response.usage.total_tokens,
+    }
+
+    # Some newer models also expose reasoning tokens; if missing, default to 0
+    reasoning_tokens = getattr(response.usage, "reasoning_tokens", 0) or 0
+    usage_data["reasoning_tokens"] = reasoning_tokens
+    return review_text, usage_data
+
+
+# ---------------- HIGH-LEVEL REVIEW PIPELINE ----------------
 
 def run_review_pipeline_single(
     client: OpenAI,
@@ -394,10 +394,7 @@ def run_review_pipeline_single(
 
     # Safety cap to avoid absurdly large prompts
     if len(pdf_text) > 800_000:
-        raise ValueError(
-            "PDF text is very large. For now, please test with a smaller TI PDF "
-            "or split the document. (Chunking has been disabled in this version.)"
-        )
+        pdf_text = pdf_text[:800_000]
 
     review_text, usage = call_buckeye_ti_amep_single(
         client,
@@ -427,15 +424,10 @@ def run_review_pipeline_single(
         "cost_input_usd": round(cost_input, 6),
         "cost_output_usd": round(cost_output, 6),
         "cost_total_usd": round(cost_total, 6),
-        "pricing_model": "GPT-5.1 standard text tokens",
-        "pricing_notes": (
-            "Cost estimate uses official GPT-5.1 prices: "
-            f"${GPT51_INPUT_PRICE_PER_M}/1M input, "
-            f"${GPT51_OUTPUT_PRICE_PER_M}/1M output tokens."
-        ),
     }
 
     return review_text, usage_summary
+
 
 # ---------------- STREAMLIT UI ----------------
 
@@ -447,8 +439,9 @@ def main():
 
     st.title("City of Buckeye – TI AMEP Review (Beta)")
     st.write(
-        "Upload a Tenant Improvement (TI) plan set in PDF format to generate an "
-        "AMEP review (Architectural, Mechanical, Electrical, Plumbing, Fire, Accessibility, Energy)."
+        "Upload Tenant Improvement (TI) plan set PDF(s) to generate an "
+        "AMEP review (Architectural, Mechanical, Electrical, Plumbing, Fire, "
+        "Accessibility, Energy)."
     )
 
     # Sidebar: API key and model info
@@ -464,19 +457,35 @@ def main():
         )
 
     if not api_key:
-        st.warning("Set OPENAI_API_KEY in the environment or enter an API key in the sidebar.")
+        st.warning(
+            "Set OPENAI_API_KEY in the environment or enter an API key in the sidebar."
+        )
         st.stop()
 
     client = get_client(api_key)
 
     st.sidebar.markdown(f"**Model:** `{MODEL_NAME}`")
 
-    # 🔹 Allow multiple PDF uploads
+    # Allow multiple PDF uploads
     uploaded_files = st.file_uploader(
         "Upload TI Plan Set PDF(s)",
         type=["pdf"],
         accept_multiple_files=True,
     )
+
+    # Let user choose which PDF to review (important when multiple files)
+    main_file = None
+    if uploaded_files:
+        file_names = [f.name for f in uploaded_files]
+        selected_name = st.selectbox(
+            "Select which PDF to run the TI AMEP review on:",
+            file_names,
+            index=0,
+        )
+        for f in uploaded_files:
+            if f.name == selected_name:
+                main_file = f
+                break
 
     project_description = st.text_area(
         "Optional project description",
@@ -489,20 +498,20 @@ def main():
     run_button = st.button("Run TI AMEP Review", type="primary")
 
     if run_button:
-        # Require at least one file
-        if not uploaded_files:
-            st.error("Please upload at least one PDF file before running the review.")
+        # Require at least one file and a selected main_file
+        if not uploaded_files or main_file is None:
+            st.error(
+                "Please upload at least one PDF and select a primary plan set "
+                "before running the review."
+            )
             st.stop()
-
-        # For now, process only the first uploaded file
-        main_file = uploaded_files[0]
 
         # Progress bar + status text
         progress_bar = st.progress(0)
         status_placeholder = st.empty()
 
         progress_bar.progress(5)
-        status_placeholder.text("Starting TI AMEP review...")
+        status_placeholder.text(f"Starting TI AMEP review on: {main_file.name} ...")
 
         # Save selected file to a temp path
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -543,7 +552,13 @@ def main():
             status_placeholder.text("TI AMEP review complete.")
 
         except Exception as e:
-            st.error(f"Error during review: {e}")
+            st.error(
+                "Error during review: "
+                f"{e}\n\n"
+                "If this is a scanned or image-only PDF, please export a "
+                "searchable/text-based PDF from CAD or request a digital "
+                "plan set from the applicant."
+            )
             try:
                 os.remove(tmp_path)
             except OSError:
@@ -584,7 +599,8 @@ def main():
     # Footer caption (always shown)
     st.caption(
         "Review performed in accordance with the 2024 IBC, IMC, IPC, IFC, "
-        "2017 ICC A117.1, 2023 NEC, 2018 IECC, ADA Standards, and City of Buckeye Amendments."
+        "2017 ICC A117.1, 2023 NEC, 2018 IECC, ADA Standards, and "
+        "City of Buckeye Amendments."
     )
 
 
