@@ -471,19 +471,31 @@ def main():
 
     st.sidebar.markdown(f"**Model:** `{MODEL_NAME}`")
 
-    uploaded_file = st.file_uploader("Upload TI Plan Set (PDF)", type=["pdf"],accept_multiple_files=True,)
+    # 🔹 Allow multiple PDF uploads
+    uploaded_files = st.file_uploader(
+        "Upload TI Plan Set PDF(s)",
+        type=["pdf"],
+        accept_multiple_files=True,
+    )
 
     project_description = st.text_area(
         "Optional project description",
-        placeholder="Example: B occupancy office TI, no structural changes, new restrooms and lighting only.",
+        placeholder=(
+            "Example: B occupancy office TI, no structural changes, "
+            "new restrooms and lighting only."
+        ),
     )
 
     run_button = st.button("Run TI AMEP Review", type="primary")
 
     if run_button:
-        if not uploaded_file:
-            st.error("Please upload a PDF file before running the review.")
+        # Require at least one file
+        if not uploaded_files:
+            st.error("Please upload at least one PDF file before running the review.")
             st.stop()
+
+        # For now, process only the first uploaded file
+        main_file = uploaded_files[0]
 
         # Progress bar + status text
         progress_bar = st.progress(0)
@@ -492,9 +504,9 @@ def main():
         progress_bar.progress(5)
         status_placeholder.text("Starting TI AMEP review...")
 
-        # Save uploaded file to a temp path
+        # Save selected file to a temp path
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp.write(uploaded_file.read())
+            tmp.write(main_file.read())
             tmp_path = tmp.name
 
         try:
@@ -511,7 +523,10 @@ def main():
             status_placeholder.text("Generating formatted review PDF...")
 
             # Generate review PDF in temp file
-            with tempfile.NamedTemporaryFile(delete=False, suffix="_buckeye_ti_amep_review.pdf") as out_tmp:
+            with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix="_buckeye_ti_amep_review.pdf",
+            ) as out_tmp:
                 out_pdf_path = Path(out_tmp.name)
 
             save_text_as_pdf(review_text, out_pdf_path)
@@ -542,33 +557,35 @@ def main():
 
         st.success("TI AMEP review complete.")
 
-        # Download button
-        base_name = Path(uploaded_file.name).stem
+        # Download button uses the primary file's name
+        base_name = Path(main_file.name).stem
         download_name = f"{base_name}_buckeye_ti_amep_review.pdf"
 
         st.download_button(
-            label="Download Review PDF",
+            label="Download TI AMEP Review PDF",
             data=pdf_bytes,
             file_name=download_name,
             mime="application/pdf",
         )
 
         # Show token usage + cost
-        st.subheader("Token usage & cost estimate")
-        st.json(usage_summary)
+        if usage_summary:
+            st.subheader("Token usage & cost estimate")
+            st.json(usage_summary)
 
-        if "cost_total_usd" in usage_summary:
-            st.markdown(
-                f"**Estimated API cost (GPT-5.1): "
-                f"${usage_summary['cost_total_usd']:.4f} USD** "
-                f"(input: ${usage_summary['cost_input_usd']:.4f}, "
-                f"output: ${usage_summary['cost_output_usd']:.4f})"
-            )
+            if "cost_total_usd" in usage_summary:
+                st.markdown(
+                    f"**Estimated API cost (GPT-5.1): "
+                    f"${usage_summary['cost_total_usd']:.4f} USD** "
+                    f"(input: ${usage_summary['cost_input_usd']:.4f}, "
+                    f"output: ${usage_summary['cost_output_usd']:.4f})"
+                )
 
-        st.caption(
-            "Review performed in accordance with the 2024 IBC, IMC, IPC, IFC, "
-            "2017 ICC A117.1, 2023 NEC, 2018 IECC, ADA Standards, and City of Buckeye Amendments."
-        )
+    # Footer caption (always shown)
+    st.caption(
+        "Review performed in accordance with the 2024 IBC, IMC, IPC, IFC, "
+        "2017 ICC A117.1, 2023 NEC, 2018 IECC, ADA Standards, and City of Buckeye Amendments."
+    )
 
 
 if __name__ == "__main__":
