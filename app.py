@@ -2,17 +2,16 @@ import os
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 import tempfile
-import textwrap
 
 import streamlit as st
 from openai import OpenAI
 from pypdf import PdfReader
 
 from reportlab.lib.pagesizes import letter, landscape
-from reportlab.pdfgen import canvas
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
+
 
 # ---------------- CONFIG ----------------
 
@@ -53,13 +52,10 @@ Only use the following codes (by exact name and year) for references:
 - 2017 ICC A117.1
 - 2023 National Electrical Code (NEC, NFPA 70)
 - 2018 International Energy Conservation Code (IECC)
-- 2010 ADA Standards for Accessible Design (ADA)
+- ADA Standards for Accessible Design
 - City of Buckeye Amendments
 
-Do NOT quote code text verbatim.
-You may cite code sections as, for example, "IBC 2024 §1005.3".
-
-Organize your review into these disciplines:
+Classify each discrepancy by discipline (one of):
 - Architectural
 - Mechanical
 - Electrical
@@ -68,7 +64,7 @@ Organize your review into these disciplines:
 - Accessibility
 - Energy
 
-The discrepancy table must be in GitHub-flavored Markdown format with **exactly**
+The discrepancy table must be in GitHub-flavored Markdown format with exactly
 the following columns in this order:
 
 | Sheet Reference | Discipline | Description of Issue | Code Section | Required Correction |
@@ -95,7 +91,7 @@ Avoid casual language or conversational fillers.
 """
 
 
-# ---------------- PDF UTILITIES ----------------
+# ---------------- PDF TEXT EXTRACTION ----------------
 
 def extract_pdf_text(pdf_path: str) -> str:
     """
@@ -157,11 +153,13 @@ def extract_pdf_text(pdf_path: str) -> str:
     return ocr_text
 
 
+# ---------------- TEXT HELPERS ----------------
+
 def _split_paragraphs_from_lines(lines: List[str]) -> List[str]:
     """
     Turn a list of lines into paragraphs separated by blank lines.
     """
-    paragraphs = []
+    paragraphs: List[str] = []
     buffer: List[str] = []
     for line in lines:
         if line.strip() == "":
@@ -182,31 +180,32 @@ def _extract_markdown_table(
     """
     Given a list of lines, attempt to locate the discrepancy table in Markdown.
     We look for a header starting with `header_prefix` and capture from there
-    through the end of a Markdown table.
+    through the end of the contiguous Markdown table.
     """
-    header_index = None
+    header_index: Optional[int] = None
     for i, line in enumerate(all_lines):
         if line.strip().startswith(header_prefix):
             header_index = i
             break
 
     if header_index is None:
+        # No table found; everything is "pre" text
         return all_lines, [], []
 
-    table_lines: List[str] = []
-    table_started = False
+    pre_lines = all_lines[:header_index]
 
+    table_lines: List[str] = []
     for line in all_lines[header_index:]:
         stripped = line.strip()
-        if stripped.startswith("|") and "|" in stripped:
+        if not stripped:
+            # blank line ends the table
+            break
+        if stripped.startswith("|"):
             table_lines.append(line)
-            table_started = True
         else:
-            if table_started:
-                # End of table
-                break
+            # first non-table, non-blank line after header ends the table
+            break
 
-    pre_lines = all_lines[:header_index]
     post_start = header_index + len(table_lines)
     post_lines = all_lines[post_start:]
 
@@ -218,6 +217,7 @@ def _markdown_table_to_data(table_lines: List[str]) -> List[List[str]]:
     Convert a minimal GFM-style table into a list-of-lists of cell text.
     We ignore the alignment row like:
     | --- | --- | --- |
+    Returns data rows only (no header), one list per row.
     """
     if not table_lines:
         return []
@@ -226,15 +226,16 @@ def _markdown_table_to_data(table_lines: List[str]) -> List[List[str]]:
     if len(lines) < 2:
         return []
 
-    header = lines[0]
-    data_lines = lines[1:]
+    # Skip header (lines[0]) and alignment (lines[1]).
+    data_lines = lines[2:]
 
     table_data: List[List[str]] = []
-    for i, line in enumerate(data_lines):
-        if set(line.strip()) <= {"|", "-", " "}:
-            # alignment row, skip
-            continue
-        row_cells = [cell.strip() for cell in line.split("|")]
+    for line in data_lines:
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            # End of table
+            break
+        row_cells = [cell.strip() for cell in stripped.split("|")]
         # Remove empty cells from leading/trailing splits
         while row_cells and row_cells[0] == "":
             row_cells.pop(0)
@@ -246,21 +247,25 @@ def _markdown_table_to_data(table_lines: List[str]) -> List[List[str]]:
     return table_data
 
 
+# ---------------- PDF REPORT GENERATION ----------------
+
 def save_text_as_pdf(text: str, pdf_path: Path) -> None:
     """
-    Create a landscape-letter PDF containing the review text, plus any
-    Markdown discrepancy table rendered as a simple table.
+    Create a landscape-letter PDF that contains ONLY the discrepancy table
+    (parsed from the Markdown table in the model output), laid out to fit the
+    page width with word-wrapped text in each cell.
+
+    If no table is found, falls back to writing the raw text as paragraphs.
     """
-    # Prepare styles
+
     stylesheet = getSampleStyleSheet()
     normal_style = stylesheet["Normal"]
-    heading_style = stylesheet["Heading2"]
 
     # Split the text into lines so we can look for the discrepancy table
     all_lines = text.splitlines()
 
-    # Try to extract markdown discrepancy table
-    pre_lines, table_lines, post_lines = _extract_markdown_table(all_lines)
+    # Extract markdown discrepancy table lines
+    _, table_lines, _ = _extract_markdown_table(all_lines)
     table_data_raw = _markdown_table_to_data(table_lines) if table_lines else []
 
     # Landscape letter document
@@ -276,32 +281,48 @@ def save_text_as_pdf(text: str, pdf_path: Path) -> None:
 
     story: List[Any] = []
 
-    # 1) Everything before the table as paragraphs
-    pre_text = "\n".join(pre_lines).strip()
-    if pre_text:
-        for para in _split_paragraphs_from_lines(pre_text.splitlines()):
-            story.append(Paragraph(para, normal_style))
-            story.append(Spacer(1, 4 * mm))
-
-    # 2) Discrepancy table (if any)
     if table_data_raw:
-        story.append(Spacer(1, 6 * mm))
-        story.append(Paragraph("Discrepancy Table", heading_style))
-        story.append(Spacer(1, 3 * mm))
+        # Fixed header row for the discrepancy table
+        header_row = [
+            "Sheet Reference",
+            "Discipline",
+            "Description of Issue",
+            "Code Section",
+            "Required Correction",
+        ]
 
-        # Optionally clamp overly long cells for PDF readability
-        max_cell_length = 350
+        # Use a smaller font and Paragraphs so word-wrap works cleanly
+        cell_style = normal_style.clone("TableCell")
+        cell_style.fontSize = 8
+        cell_style.leading = 10
 
-        processed_rows: List[List[str]] = []
+        def make_cell(content: str) -> Paragraph:
+            # Clean up odd characters that may come from extraction (optional)
+            content = (content or "").replace("■", "-")
+            return Paragraph(content, cell_style)
+
+        # Build table data with header + rows
+        full_table_data: List[List[Any]] = []
+        full_table_data.append([make_cell(c) for c in header_row])
+
         for row in table_data_raw:
-            new_row: List[str] = []
-            for cell in row:
-                if len(cell) > max_cell_length:
-                    cell = cell[: max_cell_length - 3] + "..."
-                new_row.append(cell)
-            processed_rows.append(new_row)
+            # Ensure each row has exactly 5 columns
+            if len(row) < 5:
+                row = row + [""] * (5 - len(row))
+            elif len(row) > 5:
+                row = row[:5]
+            full_table_data.append([make_cell(c) for c in row])
 
-        table = Table(processed_rows, repeatRows=1)
+        # Column widths sized to fit a landscape letter page (approx 235 mm total)
+        col_widths = [
+            30 * mm,  # Sheet Reference
+            25 * mm,  # Discipline
+            90 * mm,  # Description of Issue
+            30 * mm,  # Code Section
+            60 * mm,  # Required Correction
+        ]
+
+        table = Table(full_table_data, colWidths=col_widths, repeatRows=1)
         table.setStyle(
             TableStyle(
                 [
@@ -309,19 +330,19 @@ def save_text_as_pdf(text: str, pdf_path: Path) -> None:
                     ("BACKGROUND", (0, 0), (-1, 0), "#DDDDDD"),
                     ("ALIGN", (0, 0), (-1, 0), "CENTER"),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 8),
                     ("LEFTPADDING", (0, 0), (-1, -1), 3),
                     ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
                 ]
             )
         )
-        story.append(table)
-        story.append(Spacer(1, 6 * mm))
 
-    # 3) Everything after the table as normal paragraphs
-    post_text = "\n".join(post_lines).strip()
-    if post_text:
-        for para in _split_paragraphs_from_lines(post_text.splitlines()):
+        story.append(table)
+
+    else:
+        # Fallback: if no table is found, just drop the raw text in paragraphs
+        for para in _split_paragraphs_from_lines(all_lines):
             story.append(Paragraph(para, normal_style))
             story.append(Spacer(1, 4 * mm))
 
@@ -364,7 +385,7 @@ def call_buckeye_ti_amep_single(
     )
 
     review_text = response.choices[0].message.content or ""
-    usage_data = {
+    usage_data: Dict[str, Any] = {
         "input_tokens": response.usage.prompt_tokens,
         "output_tokens": response.usage.completion_tokens,
         "total_tokens": response.usage.total_tokens,
@@ -395,6 +416,7 @@ def run_review_pipeline_single(
     # Safety cap to avoid absurdly large prompts
     if len(pdf_text) > 800_000:
         pdf_text = pdf_text[:800_000]
+        pdf_text += "\n\n[NOTE TO REVIEWER: Plan text truncated to first 800,000 characters for token limits.]"
 
     review_text, usage = call_buckeye_ti_amep_single(
         client,
@@ -511,7 +533,9 @@ def main():
         status_placeholder = st.empty()
 
         progress_bar.progress(5)
-        status_placeholder.text(f"Starting TI AMEP review on: {main_file.name} ...")
+        status_placeholder.text(
+            f"Uploading and preparing file: {main_file.name} ..."
+        )
 
         # Save selected file to a temp path
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -520,7 +544,9 @@ def main():
 
         try:
             progress_bar.progress(25)
-            status_placeholder.text("Extracting PDF text and preparing review request...")
+            status_placeholder.text(
+                "Step 1/3 – Extracting PDF text and sending for review ..."
+            )
 
             review_text, usage_summary = run_review_pipeline_single(
                 client,
@@ -529,7 +555,9 @@ def main():
             )
 
             progress_bar.progress(70)
-            status_placeholder.text("Generating formatted review PDF...")
+            status_placeholder.text(
+                "Step 2/3 – Formatting discrepancy table into PDF ..."
+            )
 
             # Generate review PDF in temp file
             with tempfile.NamedTemporaryFile(
@@ -549,16 +577,12 @@ def main():
                 pass
 
             progress_bar.progress(100)
-            status_placeholder.text("TI AMEP review complete.")
+            status_placeholder.text("Step 3/3 – TI AMEP review complete.")
 
         except Exception as e:
-            st.error(
-                "Error during review: "
-                f"{e}\n\n"
-                "If this is a scanned or image-only PDF, please export a "
-                "searchable/text-based PDF from CAD or request a digital "
-                "plan set from the applicant."
-            )
+            st.error(f"Error during TI AMEP review: {e}")
+            progress_bar.empty()
+            status_placeholder.empty()
             try:
                 os.remove(tmp_path)
             except OSError:
@@ -571,6 +595,14 @@ def main():
                 pass
 
         st.success("TI AMEP review complete.")
+
+        # Optional: show raw review text in an expander
+        with st.expander("Show full AI review text"):
+            st.text_area(
+                "Review output",
+                value=review_text,
+                height=400,
+            )
 
         # Download button uses the primary file's name
         base_name = Path(main_file.name).stem
