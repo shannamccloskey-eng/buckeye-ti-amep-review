@@ -80,8 +80,8 @@ def main():
     header_cols = st.columns([1, 3])
     with header_cols[0]:
         if logo_path.exists():
-            # Show logo; use_column_width keeps it nicely sized in the column
-            st.image(str(logo_path), use_column_width=True)
+            # width replaces deprecated use_column_width
+            st.image(str(logo_path), width=220)
         else:
             st.caption("Logo file not found – expected 'City of Buckeye 2025.png' next to app.py")
 
