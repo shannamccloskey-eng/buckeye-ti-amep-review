@@ -361,11 +361,19 @@ def build_intake_checklist(
 
 # ---------------- STREAMLIT UI ----------------
 
-def main():
-    st.set_page_config(
-        page_title="City of Buckeye – Commercial Plan Intake (Beta)",
-        layout="wide",
-    )
+def main(embed: bool = False):
+    """
+    Commercial Plan Intake UI.
+
+    embed = False → standalone (run this file directly): sets page_config.
+    embed = True  → called from master tabbed app: skips page_config so it
+                    doesn't conflict with the global config.
+    """
+    if not embed:
+        st.set_page_config(
+            page_title="City of Buckeye – Commercial Plan Intake (Beta)",
+            layout="wide",
+        )
 
     st.title("City of Buckeye – Commercial Plan Intake (Beta)")
     st.write(
