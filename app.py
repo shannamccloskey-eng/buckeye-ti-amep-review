@@ -413,10 +413,16 @@ def run_review_pipeline_single(
     if not pdf_text.strip():
         raise ValueError("No extractable text found in PDF.")
 
-    # Safety cap to avoid absurdly large prompts
-    if len(pdf_text) > 800_000:
-        pdf_text = pdf_text[:800_000]
-        pdf_text += "\n\n[NOTE TO REVIEWER: Plan text truncated to first 800,000 characters for token limits.]"
+    # Safety cap to avoid exceeding tokens-per-minute (TPM) limits.
+    # Roughly 4 characters ≈ 1 token. With a 30k TPM limit, we cap input
+    # around 80,000 characters (~20k tokens) to leave room for prompt + output.
+    MAX_CHARS = 80_000
+    if len(pdf_text) > MAX_CHARS:
+        pdf_text = pdf_text[:MAX_CHARS]
+        pdf_text += (
+            "\n\n[NOTE TO REVIEWER: Plan text truncated to the first "
+            f"{MAX_CHARS} characters to stay within model rate limits.]"
+        )
 
     review_text, usage = call_buckeye_ti_amep_single(
         client,
@@ -454,13 +460,12 @@ def run_review_pipeline_single(
 # ---------------- STREAMLIT UI ----------------
 
 def main():
-    st.title("City of Buckeye – TI AMEP Review (Beta) – BUILD 2")
     st.set_page_config(
-        page_title="City of Buckeye – TI AMEP Review (Beta) - BUILD 2",
+        page_title="City of Buckeye – TI AMEP Review (Beta)",
         layout="wide",
     )
 
-    st.title("City of Buckeye – TI AMEP Review (Beta) - BUILD 2")
+    st.title("City of Buckeye – TI AMEP Review (Beta)")
     st.write(
         "Upload Tenant Improvement (TI) plan set PDF(s) to generate an "
         "AMEP review (Architectural, Mechanical, Electrical, Plumbing, Fire, "
