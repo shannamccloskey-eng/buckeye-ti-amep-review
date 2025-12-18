@@ -371,11 +371,11 @@ def main(embed: bool = False):
     """
     if not embed:
         st.set_page_config(
-            page_title="City of Buckeye – Commercial Plan Intake (Beta)",
+            page_title="City of Buckeye – Commercial Plan Intake (Build 1.0)",
             layout="wide",
         )
 
-    st.title("City of Buckeye – Commercial Plan Intake (Beta)")
+    st.title("City of Buckeye – Commercial Plan Intake (Build 1.0)")
     st.write(
         "This tool helps determine whether a COMMERCIAL plan submittal is complete for intake. "
         "It checks required documents based on project type and whether the plans show food-service features."
