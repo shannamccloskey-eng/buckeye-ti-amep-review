@@ -461,11 +461,11 @@ def run_review_pipeline_single(
 
 def main():
     st.set_page_config(
-        page_title="City of Buckeye – TI AMEP Review (Beta)",
+        page_title="City of Buckeye – TI AMEP Review (Build 2.1)",
         layout="wide",
     )
 
-    st.title("City of Buckeye – TI AMEP Review (Beta)")
+    st.title("City of Buckeye – TI AMEP Review (Build 2.1)")
     st.write(
         "Upload Tenant Improvement (TI) plan set PDF(s) to generate an "
         "AMEP review (Architectural, Mechanical, Electrical, Plumbing, Fire, "
