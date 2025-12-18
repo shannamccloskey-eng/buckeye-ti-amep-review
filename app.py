@@ -456,7 +456,7 @@ def run_review_pipeline_single(
 def main():
     st.title("City of Buckeye – TI AMEP Review (Beta) – BUILD 2")
     st.set_page_config(
-        page_title="City of Buckeye – TI AMEP Review (Beta)",
+        page_title="City of Buckeye – TI AMEP Review (Beta) - BUILD 2",
         layout="wide",
     )
 
