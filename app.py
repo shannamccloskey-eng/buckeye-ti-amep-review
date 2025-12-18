@@ -1,5 +1,6 @@
 import importlib
 from typing import Callable, Dict, Any, List
+from pathlib import Path
 
 import streamlit as st
 
@@ -12,7 +13,7 @@ TOOLS: List[Dict[str, Any]] = [
         "label": "Plan Intake",
         "module": "intake_app",   # intake_app.py
         "func": "main",
-        "kwargs": {"embed": True},  # see notes for intake_app.main(embed=...)
+        "kwargs": {"embed": True},  # intake_app.main(embed=...)
     },
     {
         "label": "TI AMEP Review",
@@ -39,7 +40,7 @@ TOOLS: List[Dict[str, Any]] = [
 def _load_tool_callable(tool: Dict[str, Any]) -> Callable[[], None]:
     """
     Import the module + function specified in TOOLS.
-    Returns a zero-arg callable we can just run inside the tab.
+    Returns a zero-arg callable we can run inside the tab.
     If anything fails, returns a function that displays an error in the UI.
     """
     label = tool["label"]
@@ -59,8 +60,10 @@ def _load_tool_callable(tool: Dict[str, Any]) -> Callable[[], None]:
 
     except Exception as e:
         def _error():
-            st.error(f"Error loading tool '{label}' "
-                     f"({module_name}.{func_name}): {e}")
+            st.error(
+                f"Error loading tool '{label}' "
+                f"({module_name}.{func_name}): {e}"
+            )
         return _error
 
 
@@ -71,7 +74,25 @@ def main():
         layout="wide",
     )
 
-    st.title("City of Buckeye – Plan Review Tools")
+    # ---- Header with Buckeye logo + title ----
+    logo_path = Path(__file__).parent / "City of Buckeye 2025.png"  # <-- change name here if needed
+
+    header_cols = st.columns([1, 3])
+    with header_cols[0]:
+        if logo_path.exists():
+            # Show logo; use_column_width keeps it nicely sized in the column
+            st.image(str(logo_path), use_column_width=True)
+        else:
+            st.caption("Logo file not found – expected 'City of Buckeye 2025.png' next to app.py")
+
+    with header_cols[1]:
+        st.title("City of Buckeye – Plan Review Tools")
+        st.write(
+            "Unified interface for Building Safety tools, including Commercial Plan Intake "
+            "and TI AMEP review. Additional review tools can be added as new tabs."
+        )
+
+    st.markdown("---")
 
     # Build tabs from TOOLS registry
     tab_labels = [tool["label"] for tool in TOOLS]
