@@ -460,7 +460,7 @@ def main():
         layout="wide",
     )
 
-    st.title("City of Buckeye – TI AMEP Review (Beta)")
+    st.title("City of Buckeye – TI AMEP Review (Beta) - BUILD 2")
     st.write(
         "Upload Tenant Improvement (TI) plan set PDF(s) to generate an "
         "AMEP review (Architectural, Mechanical, Electrical, Plumbing, Fire, "
