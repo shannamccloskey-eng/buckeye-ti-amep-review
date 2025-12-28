@@ -10,14 +10,14 @@ import streamlit as st
 # -------------------------------------------------------------------
 TOOLS: List[Dict[str, Any]] = [
     {
-        "label": "Plan Intaken - test",
-        "module": "intake_app",   # intake_app.py
+        "label": "Plan Intake",      # cleaned label
+        "module": "intake_app",     # intake_app.py
         "func": "main",
         "kwargs": {"embed": True},  # intake_app.main(embed=...)
     },
     {
         "label": "TI AMEP Review",
-        "module": "ti_amep_app",  # ti_amep_app.py
+        "module": "ti_amep_app",    # ti_amep_app.py
         "func": "main",
         "kwargs": {"embed": True},  # ti_amep_app.main(embed=...)
     },
@@ -110,7 +110,7 @@ html, body, [data-testid="stAppViewContainer"] {
 
 /* ---------------- Tabs styling ---------------- */
 div[data-testid="stTabs"] > div[role="tablist"] {
-  border-bottom: 1px solid var(--buckeye-border);
+  border-bottom: 1px solid var(--buckeye-border) !important;
   padding-bottom: 0.25rem;
   gap: 0.25rem;
 }
@@ -123,6 +123,7 @@ div[data-testid="stTabs"] button[role="tab"] {
   color: var(--buckeye-muted);
   border: 1px solid transparent;
   background: transparent;
+  box-shadow: none !important;
 }
 
 /* Hover */
@@ -133,10 +134,17 @@ div[data-testid="stTabs"] button[role="tab"]:hover {
 
 /* Active tab */
 div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
-  color: white;
-  background: var(--buckeye-primary);
-  border-color: var(--buckeye-primary);
-  box-shadow: 0 4px 10px rgba(196,92,38,0.35);
+  color: white !important;
+  background: var(--buckeye-primary) !important;
+  border-color: var(--buckeye-primary) !important;
+  box-shadow: 0 4px 10px rgba(196,92,38,0.35) !important;
+}
+
+/* Remove any default underline / highlight from active tab */
+div[data-testid="stTabs"] button[role="tab"][aria-selected="true"]::before,
+div[data-testid="stTabs"] button[role="tab"][aria-selected="true"]::after {
+  border-bottom: none !important;
+  box-shadow: none !important;
 }
 
 /* ---------------- Card feel for tab content ---------------- */
@@ -170,7 +178,7 @@ button[kind="secondary"], button[kind="secondary"] * {
   border-radius: 999px !important;
 }
 
-/* Info boxes / alerts spacing tweaks */
+/* Info boxes / alerts */
 [data-baseweb="notification"] {
   border-radius: 10px;
 }
