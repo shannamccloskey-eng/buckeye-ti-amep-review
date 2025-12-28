@@ -249,4 +249,19 @@ def main():
     tab_labels = [tool["label"] for tool in TOOLS]
     tabs = st.tabs(tab_labels)
 
-    for tab
+    # IMPORTANT: this whole for-loop must be intact (no stray line breaks)
+    for tab, tool in zip(tabs, TOOLS):
+        with tab:
+            render_tool = _load_tool_callable(tool)
+            render_tool()
+
+    # Global footer / caption
+    st.caption(
+        "Review performed in accordance with the 2024 IBC, IMC, IPC, IFC, "
+        "2017 ICC A117.1, 2023 NEC, 2018 IECC, ADA Standards, and "
+        "City of Buckeye Amendments."
+    )
+
+
+if __name__ == "__main__":
+    main()
