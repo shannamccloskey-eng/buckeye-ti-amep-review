@@ -10,7 +10,7 @@ import streamlit as st
 # -------------------------------------------------------------------
 TOOLS: List[Dict[str, Any]] = [
     {
-        "label": "Plan Intake - test",
+        "label": "Plan Intake",
         "module": "intake_app",   # intake_app.py
         "func": "main",
         "kwargs": {"embed": True},  # intake_app.main(embed=...)
