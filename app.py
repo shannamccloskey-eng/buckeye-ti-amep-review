@@ -28,12 +28,12 @@ TOOLS: List[Dict[str, Any]] = [
     #     "func": "main",
     #     "kwargs": {"embed": True},
     # },
-    # {
-    #     "label": "Geotechnical Review",
-    #     "module": "geo_app",
-    #     "func": "main",
-    #     "kwargs": {"embed": True},
-    # },
+    {
+         "label": "Geotechnical Summary",
+         "module": "geo_app",
+         "func": "main",
+         "kwargs": {"embed": True},
+     },
 ]
 
 
@@ -74,7 +74,7 @@ def _inject_custom_css() -> None:
     - Pill-style colored tabs
     - Card-style tab content
     - Modern buttons, backgrounds, etc.
-    - Extra padding for logo so it isn't clipped
+    - Extra padding + centering help for logo
     """
     st.markdown(
         """
@@ -106,12 +106,18 @@ html, body, [data-testid="stAppViewContainer"] {
 
 /* Main container spacing */
 .block-container {
-  padding-top: 1.5rem;
+  padding-top: 0.75rem;  /* slightly reduced so logo + title sit nicely */
 }
 
-/* Add a bit of padding above the logo so it's not clipped */
+/* Logo wrapper – extra padding so it isn't clipped */
 .buckeye-logo {
-  padding-top: 0.4rem;
+  padding-top: 0.6rem;
+  padding-bottom: 0.4rem;
+}
+
+/* Make sure the logo image itself never hugs the top edge */
+.buckeye-logo img {
+  display: block;
 }
 
 /* ---------------- Tabs styling ---------------- */
@@ -179,82 +185,4 @@ div[data-testid="stTabs"] + div {
   border-color: #ad4f21;
 }
 
-/* Secondary (e.g., download) buttons */
-button[kind="secondary"], button[kind="secondary"] * {
-  border-radius: 999px !important;
-}
-
-/* Info boxes / alerts */
-[data-baseweb="notification"] {
-  border-radius: 10px;
-}
-
-/* Tables */
-table {
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-/* Hide default Streamlit footer */
-footer, .stApp footer {
-  visibility: hidden;
-}
-</style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def main():
-    # Global page config – sidebar collapsed so no extra column
-    st.set_page_config(
-        page_title="City of Buckeye – Plan Review Tools",
-        layout="wide",
-        initial_sidebar_state="collapsed",
-    )
-
-    _inject_custom_css()
-
-    # ---- Header with Buckeye logo + title ----
-    logo_path = Path(__file__).parent / "City of Buckeye 2025.png"  # change name here if needed
-
-    header_cols = st.columns([1, 3])
-    with header_cols[0]:
-        if logo_path.exists():
-            # Wrap in a div with extra top padding so the logo isn't clipped
-            st.markdown('<div class="buckeye-logo">', unsafe_allow_html=True)
-            st.image(str(logo_path), width=220)
-            st.markdown('</div>', unsafe_allow_html=True)
-        else:
-            st.caption(
-                "Logo file not found – expected 'City of Buckeye 2025.png' next to app.py"
-            )
-
-    with header_cols[1]:
-        st.title("City of Buckeye – Plan Review Tools")
-        st.write(
-            "Unified interface for Building Safety tools, including Commercial Plan Intake "
-            "and TI AMEP review. Additional review tools can be added as new tabs."
-        )
-
-    st.markdown("---")
-
-    # Build tabs from TOOLS registry
-    tab_labels = [tool["label"] for tool in TOOLS]
-    tabs = st.tabs(tab_labels)
-
-    for tab, tool in zip(tabs, TOOLS):
-        with tab:
-            render_tool = _load_tool_callable(tool)
-            render_tool()
-
-    # Global footer / caption
-    st.caption(
-        "Review performed in accordance with the 2024 IBC, IMC, IPC, IFC, "
-        "2017 ICC A117.1, 2023 NEC, 2018 IECC, ADA Standards, and "
-        "City of Buckeye Amendments."
-    )
-
-
-if __name__ == "__main__":
-    main()
+/
