@@ -67,6 +67,125 @@ def _load_tool_callable(tool: Dict[str, Any]) -> Callable[[], None]:
         return _error
 
 
+def _inject_custom_css() -> None:
+    """
+    Inject custom CSS to modernize the look:
+    - Softer background
+    - Card-like content area
+    - Pill-style colored tabs
+    - Slightly styled buttons
+    """
+    st.markdown(
+        """
+<style>
+/* ---------- Base layout & background ---------- */
+:root {
+  --buckeye-primary: #c45c26;   /* Buckeye orange */
+  --buckeye-primary-soft: rgba(196,92,38,0.08);
+  --buckeye-dark: #1f2933;
+  --buckeye-muted: #6b7280;
+  --buckeye-border: #e0e4ea;
+  --buckeye-bg: #f5f6fa;
+}
+
+/* App background */
+[data-testid="stAppViewContainer"] {
+  background: var(--buckeye-bg);
+}
+
+/* Sidebar background */
+[data-testid="stSidebar"] {
+  background-color: white;
+  border-right: 1px solid var(--buckeye-border);
+}
+
+/* Global typography tweaks */
+html, body, [data-testid="stAppViewContainer"] {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/* ---------- Header spacing ---------- */
+.block-container {
+  padding-top: 1.5rem;
+}
+
+/* ---------- Tabs styling ---------- */
+div[data-testid="stTabs"] > div[role="tablist"] {
+  border-bottom: 1px solid var(--buckeye-border);
+  padding-bottom: 0.25rem;
+  gap: 0.25rem;
+}
+
+/* Individual tab buttons */
+div[data-testid="stTabs"] button[role="tab"] {
+  border-radius: 999px;
+  padding: 0.35rem 1rem;
+  font-weight: 500;
+  color: var(--buckeye-muted);
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+/* Hover state */
+div[data-testid="stTabs"] button[role="tab"]:hover {
+  background: rgba(31,41,51,0.04);
+  color: var(--buckeye-dark);
+}
+
+/* Active tab */
+div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+  color: white;
+  background: var(--buckeye-primary);
+  border-color: var(--buckeye-primary);
+}
+
+/* ---------- "Card" feel for tab content ---------- */
+div[data-testid="stTabs"] + div {
+  margin-top: 0.75rem;
+  padding: 1.25rem 1.5rem 1.5rem 1.5rem;
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+  border: 1px solid var(--buckeye-border);
+}
+
+/* ---------- Buttons ---------- */
+.stButton>button {
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--buckeye-primary);
+  color: white;
+  font-weight: 600;
+  padding: 0.4rem 1.3rem;
+  box-shadow: 0 4px 10px rgba(196,92,38,0.25);
+}
+
+.stButton>button:hover {
+  background: #ad4f21;
+  border-color: #ad4f21;
+}
+
+/* Secondary buttons (e.g., download) – let Streamlit style but smooth corners */
+button[kind="secondary"], button[kind="secondary"] * {
+  border-radius: 999px !important;
+}
+
+/* ---------- Tables ---------- */
+table {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* ---------- Footer text ---------- */
+footer, .stApp footer {
+  visibility: hidden;
+}
+</style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def main():
     # Global page config – must be called exactly once
     st.set_page_config(
@@ -74,16 +193,19 @@ def main():
         layout="wide",
     )
 
+    _inject_custom_css()
+
     # ---- Header with Buckeye logo + title ----
-    logo_path = Path(__file__).parent / "City of Buckeye 2025.png"  # <-- change name here if needed
+    logo_path = Path(__file__).parent / "City of Buckeye 2025.png"  # change name here if needed
 
     header_cols = st.columns([1, 3])
     with header_cols[0]:
         if logo_path.exists():
-            # width replaces deprecated use_column_width
             st.image(str(logo_path), width=220)
         else:
-            st.caption("Logo file not found – expected 'City of Buckeye 2025.png' next to app.py")
+            st.caption(
+                "Logo file not found – expected 'City of Buckeye 2025.png' next to app.py"
+            )
 
     with header_cols[1]:
         st.title("City of Buckeye – Plan Review Tools")
@@ -103,7 +225,7 @@ def main():
             render_tool = _load_tool_callable(tool)
             render_tool()
 
-    # Global footer
+    # Global footer / caption
     st.caption(
         "Review performed in accordance with the 2024 IBC, IMC, IPC, IFC, "
         "2017 ICC A117.1, 2023 NEC, 2018 IECC, ADA Standards, and "
