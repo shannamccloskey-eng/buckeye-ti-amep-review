@@ -69,18 +69,18 @@ def _load_tool_callable(tool: Dict[str, Any]) -> Callable[[], None]:
 
 def _inject_custom_css() -> None:
     """
-    Inject custom CSS to modernize the look:
-    - Softer background
-    - Card-like content area
+    Inject custom CSS for:
+    - Buckeye color palette
     - Pill-style colored tabs
-    - Slightly styled buttons
+    - Card-style tab content
+    - Modern buttons, backgrounds, etc.
     """
     st.markdown(
         """
 <style>
 :root {
-  --buckeye-primary: #c45c26;
-  --buckeye-primary-soft: rgba(196,92,38,0.08);
+  --buckeye-primary: #c45c26;        /* Buckeye orange */
+  --buckeye-primary-soft: #fbe6da;   /* soft orange background */
   --buckeye-dark: #1f2933;
   --buckeye-muted: #6b7280;
   --buckeye-border: #e0e4ea;
@@ -92,7 +92,7 @@ def _inject_custom_css() -> None:
   background: var(--buckeye-bg);
 }
 
-/* Sidebar background (will be collapsed; this just keeps it clean if opened) */
+/* Sidebar (collapsed by default, but keep clean if opened) */
 [data-testid="stSidebar"] {
   background-color: white;
   border-right: 1px solid var(--buckeye-border);
@@ -108,34 +108,38 @@ html, body, [data-testid="stAppViewContainer"] {
   padding-top: 1.5rem;
 }
 
-/* Tabs styling */
+/* ---------------- Tabs styling ---------------- */
 div[data-testid="stTabs"] > div[role="tablist"] {
   border-bottom: 1px solid var(--buckeye-border);
   padding-bottom: 0.25rem;
   gap: 0.25rem;
 }
 
+/* Tab buttons: pill shape */
 div[data-testid="stTabs"] button[role="tab"] {
   border-radius: 999px;
-  padding: 0.35rem 1rem;
+  padding: 0.35rem 1.1rem;
   font-weight: 500;
   color: var(--buckeye-muted);
   border: 1px solid transparent;
   background: transparent;
 }
 
+/* Hover */
 div[data-testid="stTabs"] button[role="tab"]:hover {
   background: rgba(31,41,51,0.04);
   color: var(--buckeye-dark);
 }
 
+/* Active tab */
 div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
   color: white;
   background: var(--buckeye-primary);
   border-color: var(--buckeye-primary);
+  box-shadow: 0 4px 10px rgba(196,92,38,0.35);
 }
 
-/* Card look for tab content */
+/* ---------------- Card feel for tab content ---------------- */
 div[data-testid="stTabs"] + div {
   margin-top: 0.75rem;
   padding: 1.25rem 1.5rem 1.5rem 1.5rem;
@@ -145,7 +149,7 @@ div[data-testid="stTabs"] + div {
   border: 1px solid var(--buckeye-border);
 }
 
-/* Primary buttons */
+/* ---------------- Buttons ---------------- */
 .stButton>button {
   border-radius: 999px;
   border: 1px solid transparent;
@@ -161,9 +165,14 @@ div[data-testid="stTabs"] + div {
   border-color: #ad4f21;
 }
 
-/* Secondary buttons (e.g., download) */
+/* Secondary (e.g., download) buttons */
 button[kind="secondary"], button[kind="secondary"] * {
   border-radius: 999px !important;
+}
+
+/* Info boxes / alerts spacing tweaks */
+[data-baseweb="notification"] {
+  border-radius: 10px;
 }
 
 /* Tables */
@@ -183,7 +192,7 @@ footer, .stApp footer {
 
 
 def main():
-    # Global page config – sidebar starts collapsed
+    # Global page config – sidebar collapsed so no extra column
     st.set_page_config(
         page_title="City of Buckeye – Plan Review Tools",
         layout="wide",
@@ -193,7 +202,7 @@ def main():
     _inject_custom_css()
 
     # ---- Header with Buckeye logo + title ----
-    logo_path = Path(__file__).parent / "City of Buckeye 2025.png"  # update name if different
+    logo_path = Path(__file__).parent / "City of Buckeye 2025.png"  # change name here if needed
 
     header_cols = st.columns([1, 3])
     with header_cols[0]:
