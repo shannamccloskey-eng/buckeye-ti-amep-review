@@ -78,9 +78,8 @@ def _inject_custom_css() -> None:
     st.markdown(
         """
 <style>
-/* ---------- Base layout & background ---------- */
 :root {
-  --buckeye-primary: #c45c26;   /* Buckeye orange */
+  --buckeye-primary: #c45c26;
   --buckeye-primary-soft: rgba(196,92,38,0.08);
   --buckeye-dark: #1f2933;
   --buckeye-muted: #6b7280;
@@ -93,30 +92,29 @@ def _inject_custom_css() -> None:
   background: var(--buckeye-bg);
 }
 
-/* Sidebar background */
+/* Sidebar background (will be collapsed; this just keeps it clean if opened) */
 [data-testid="stSidebar"] {
   background-color: white;
   border-right: 1px solid var(--buckeye-border);
 }
 
-/* Global typography tweaks */
+/* Base typography */
 html, body, [data-testid="stAppViewContainer"] {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-/* ---------- Header spacing ---------- */
+/* Main container spacing */
 .block-container {
   padding-top: 1.5rem;
 }
 
-/* ---------- Tabs styling ---------- */
+/* Tabs styling */
 div[data-testid="stTabs"] > div[role="tablist"] {
   border-bottom: 1px solid var(--buckeye-border);
   padding-bottom: 0.25rem;
   gap: 0.25rem;
 }
 
-/* Individual tab buttons */
 div[data-testid="stTabs"] button[role="tab"] {
   border-radius: 999px;
   padding: 0.35rem 1rem;
@@ -126,20 +124,18 @@ div[data-testid="stTabs"] button[role="tab"] {
   background: transparent;
 }
 
-/* Hover state */
 div[data-testid="stTabs"] button[role="tab"]:hover {
   background: rgba(31,41,51,0.04);
   color: var(--buckeye-dark);
 }
 
-/* Active tab */
 div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
   color: white;
   background: var(--buckeye-primary);
   border-color: var(--buckeye-primary);
 }
 
-/* ---------- "Card" feel for tab content ---------- */
+/* Card look for tab content */
 div[data-testid="stTabs"] + div {
   margin-top: 0.75rem;
   padding: 1.25rem 1.5rem 1.5rem 1.5rem;
@@ -149,7 +145,7 @@ div[data-testid="stTabs"] + div {
   border: 1px solid var(--buckeye-border);
 }
 
-/* ---------- Buttons ---------- */
+/* Primary buttons */
 .stButton>button {
   border-radius: 999px;
   border: 1px solid transparent;
@@ -165,18 +161,18 @@ div[data-testid="stTabs"] + div {
   border-color: #ad4f21;
 }
 
-/* Secondary buttons (e.g., download) – let Streamlit style but smooth corners */
+/* Secondary buttons (e.g., download) */
 button[kind="secondary"], button[kind="secondary"] * {
   border-radius: 999px !important;
 }
 
-/* ---------- Tables ---------- */
+/* Tables */
 table {
   border-radius: 8px;
   overflow: hidden;
 }
 
-/* ---------- Footer text ---------- */
+/* Hide default Streamlit footer */
 footer, .stApp footer {
   visibility: hidden;
 }
@@ -187,16 +183,17 @@ footer, .stApp footer {
 
 
 def main():
-    # Global page config – must be called exactly once
+    # Global page config – sidebar starts collapsed
     st.set_page_config(
         page_title="City of Buckeye – Plan Review Tools",
         layout="wide",
+        initial_sidebar_state="collapsed",
     )
 
     _inject_custom_css()
 
     # ---- Header with Buckeye logo + title ----
-    logo_path = Path(__file__).parent / "City of Buckeye 2025.png"  # change name here if needed
+    logo_path = Path(__file__).parent / "City of Buckeye 2025.png"  # update name if different
 
     header_cols = st.columns([1, 3])
     with header_cols[0]:
