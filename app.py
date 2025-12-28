@@ -10,14 +10,14 @@ import streamlit as st
 # -------------------------------------------------------------------
 TOOLS: List[Dict[str, Any]] = [
     {
-        "label": "Plan Intake",      # cleaned label
-        "module": "intake_app",     # intake_app.py
+        "label": "Plan Intake",
+        "module": "intake_app",   # intake_app.py
         "func": "main",
         "kwargs": {"embed": True},  # intake_app.main(embed=...)
     },
     {
         "label": "TI AMEP Review",
-        "module": "ti_amep_app",    # ti_amep_app.py
+        "module": "ti_amep_app",  # ti_amep_app.py
         "func": "main",
         "kwargs": {"embed": True},  # ti_amep_app.main(embed=...)
     },
@@ -74,6 +74,7 @@ def _inject_custom_css() -> None:
     - Pill-style colored tabs
     - Card-style tab content
     - Modern buttons, backgrounds, etc.
+    - Extra padding for logo so it isn't clipped
     """
     st.markdown(
         """
@@ -106,6 +107,11 @@ html, body, [data-testid="stAppViewContainer"] {
 /* Main container spacing */
 .block-container {
   padding-top: 1.5rem;
+}
+
+/* Add a bit of padding above the logo so it's not clipped */
+.buckeye-logo {
+  padding-top: 0.4rem;
 }
 
 /* ---------------- Tabs styling ---------------- */
@@ -215,7 +221,10 @@ def main():
     header_cols = st.columns([1, 3])
     with header_cols[0]:
         if logo_path.exists():
+            # Wrap in a div with extra top padding so the logo isn't clipped
+            st.markdown('<div class="buckeye-logo">', unsafe_allow_html=True)
             st.image(str(logo_path), width=220)
+            st.markdown('</div>', unsafe_allow_html=True)
         else:
             st.caption(
                 "Logo file not found – expected 'City of Buckeye 2025.png' next to app.py"
