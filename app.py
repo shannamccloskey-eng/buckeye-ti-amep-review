@@ -104,14 +104,14 @@ html, body, [data-testid="stAppViewContainer"] {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-/* Main container spacing */
+/* Main container spacing – bumped up to give logo more room */
 .block-container {
-  padding-top: 0.75rem;  /* slightly reduced so logo + title sit nicely */
+  padding-top: 1.5rem;
 }
 
-/* Logo wrapper – extra padding so it isn't clipped */
+/* Logo wrapper – extra padding so it isn't clipped at the top */
 .buckeye-logo {
-  padding-top: 0.6rem;
+  padding-top: 1.0rem;
   padding-bottom: 0.4rem;
 }
 
@@ -249,7 +249,6 @@ def main():
     tab_labels = [tool["label"] for tool in TOOLS]
     tabs = st.tabs(tab_labels)
 
-    # IMPORTANT: this whole for-loop must be intact (no stray line breaks)
     for tab, tool in zip(tabs, TOOLS):
         with tab:
             render_tool = _load_tool_callable(tool)
