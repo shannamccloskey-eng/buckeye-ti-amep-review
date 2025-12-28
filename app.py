@@ -21,19 +21,19 @@ TOOLS: List[Dict[str, Any]] = [
         "func": "main",
         "kwargs": {"embed": True},  # ti_amep_app.main(embed=...)
     },
-    # Future tools – just uncomment/add these when ready:
+    {
+        "label": "Geotechnical Review",
+        "module": "geo_app",      # geo_app.py
+        "func": "main",
+        "kwargs": {"embed": True},  # geo_app.main(embed=...)
+    },
+    # Future tools – e.g.:
     # {
     #     "label": "Architectural Review",
     #     "module": "arch_app",
     #     "func": "main",
     #     "kwargs": {"embed": True},
     # },
-    {
-         "label": "Geotechnical Summary",
-         "module": "geo_app",
-         "func": "main",
-         "kwargs": {"embed": True},
-     },
 ]
 
 
@@ -185,4 +185,68 @@ div[data-testid="stTabs"] + div {
   border-color: #ad4f21;
 }
 
-/
+/* Secondary (e.g., download) buttons */
+button[kind="secondary"], button[kind="secondary"] * {
+  border-radius: 999px !important;
+}
+
+/* Info boxes / alerts */
+[data-baseweb="notification"] {
+  border-radius: 10px;
+}
+
+/* Tables */
+table {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Hide default Streamlit footer */
+footer, .stApp footer {
+  visibility: hidden;
+}
+</style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def main():
+    # Global page config – sidebar collapsed so no extra column
+    st.set_page_config(
+        page_title="City of Buckeye – Plan Review Tools",
+        layout="wide",
+        initial_sidebar_state="collapsed",
+    )
+
+    _inject_custom_css()
+
+    # ---- Header with Buckeye logo + title ----
+    logo_path = Path(__file__).parent / "City of Buckeye 2025.png"  # change name here if needed
+
+    # Align logo + title vertically in the header row
+    header_cols = st.columns([1, 3], vertical_alignment="center")
+    with header_cols[0]:
+        if logo_path.exists():
+            st.markdown('<div class="buckeye-logo">', unsafe_allow_html=True)
+            st.image(str(logo_path), width=200)
+            st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.caption(
+                "Logo file not found – expected 'City of Buckeye 2025.png' next to app.py"
+            )
+
+    with header_cols[1]:
+        st.title("City of Buckeye – Plan Review Tools")
+        st.write(
+            "Unified interface for Building Safety tools, including Commercial Plan Intake, "
+            "TI AMEP review, and Geotechnical review. Additional tools can be added as new tabs."
+        )
+
+    st.markdown("---")
+
+    # Build tabs from TOOLS registry
+    tab_labels = [tool["label"] for tool in TOOLS]
+    tabs = st.tabs(tab_labels)
+
+    for tab
