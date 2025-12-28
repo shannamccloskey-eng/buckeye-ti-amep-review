@@ -127,22 +127,6 @@ def classify_support_doc(
 ) -> Dict[str, Any]:
     """
     Classify a single supporting document into the known document types.
-    Returns:
-      {
-        "doc_types": {
-            "geotech_report": bool,
-            "deferred_truss_form": bool,
-            "special_inspections_form": bool,
-            "struct_calcs": bool,
-            "struct_sheets": bool,
-            "grease_interceptor": bool,
-            "walk_in_cooler": bool,
-            "walk_in_freezer": bool,
-            "hood_specs": bool,
-            "iecc_docs": bool
-        },
-        "notes": "short reasoning"
-      }
     """
     user_prompt = f"""
 You are assisting City of Buckeye Building Department with COMMERCIAL PLAN INTAKE.
@@ -251,14 +235,6 @@ def build_intake_checklist(
     ai_detected_docs: Dict[str, bool],
     doc_sources: Dict[str, List[str]],
 ) -> Dict[str, Any]:
-    """
-    Build an intake checklist from:
-      - project_type
-      - food service flags
-      - AI analysis of plans (food-service features)
-      - AI classification of supporting documents
-    """
-
     rows = []
 
     def add_row(code: str, required: bool, note: str = ""):
@@ -293,12 +269,12 @@ def build_intake_checklist(
             }
         )
 
-    # 1) Always required docs – consider them "provided" if there is at least a main plan set
+    # Always-required docs
     add_row("completed_application", required=True, note="Verified by intake staff from application submittal.")
     add_row("arch_set", required=True, note="Typically included within the main plan PDF.")
     add_row("mep_set", required=True, note="Typically included within the main plan PDF.")
 
-    # 2) Shell + Ground-Up extras
+    # Shell / ground-up extras
     if project_type in ("Shell Building", "Ground-Up"):
         add_row("geotech_report", True)
         add_row("deferred_truss_form", True)
@@ -306,7 +282,7 @@ def build_intake_checklist(
         add_row("struct_calcs", True)
         add_row("struct_sheets", True)
 
-    # 3) Food-service-driven docs
+    # Food-service-driven docs
     analysis_food = bool(plan_analysis.get("is_food_service_by_plans", False))
     found_food_items = plan_analysis.get("found_items", {}) or {}
     any_food_feature = any(found_food_items.values())
@@ -365,17 +341,19 @@ def main(embed: bool = False):
     """
     Commercial Plan Intake UI.
 
-    embed = False → standalone (run this file directly): sets page_config.
-    embed = True  → called from master tabbed app: skips page_config so it
-                    doesn't conflict with the global config.
+    embed = False → standalone (run this file directly).
+    embed = True  → called from master tabbed app.
     """
     if not embed:
         st.set_page_config(
-            page_title="City of Buckeye – Commercial Plan Intake (Build 1.0)",
+            page_title="City of Buckeye – Commercial Plan Intake (Beta)",
             layout="wide",
+            initial_sidebar_state="collapsed",
         )
 
     st.title("City of Buckeye – Commercial Plan Intake (Build 1.0)")
+    st.caption(f"Model: `{MODEL_NAME}`")
+
     st.write(
         "This tool helps determine whether a COMMERCIAL plan submittal is complete for intake. "
         "It checks required documents based on project type and whether the plans show food-service features."
@@ -389,24 +367,16 @@ def main(embed: bool = False):
         "Step 4: Run the intake check to verify completeness."
     )
 
-    # Sidebar: configuration / API key
-    st.sidebar.header("Configuration")
-
+    # ---- API key (no sidebar) ----
     env_api_key = os.environ.get("OPENAI_API_KEY", "")
-    api_key = env_api_key
-    if not api_key:
-        api_key = st.sidebar.text_input(
-            "OpenAI API Key",
-            type="password",
-            help="If not set in environment, enter it here for this session.",
+    if not env_api_key:
+        st.error(
+            "OPENAI_API_KEY is not set in the environment. "
+            "Please export it before running the app."
         )
-
-    if not api_key:
-        st.warning("Set OPENAI_API_KEY in the environment or enter an API key in the sidebar.")
         st.stop()
 
-    client = get_client(api_key)
-    st.sidebar.markdown(f"**Model:** `{MODEL_NAME}`")
+    client = get_client(env_api_key)
 
     # --- Main form ---
 
@@ -524,13 +494,11 @@ def main(embed: bool = False):
                             ai_detected_docs[code] = True
                             doc_sources.setdefault(code, []).append(filename)
 
-            # For now, assume completed application, arch set, and MEP set
-            # are present with the main plan submittal (verified by intake staff).
+            # Assume main plan includes these:
             ai_detected_docs.setdefault("completed_application", True)
             ai_detected_docs.setdefault("arch_set", True)
             ai_detected_docs.setdefault("mep_set", True)
 
-            # --- Build final intake checklist... ---
             checklist = build_intake_checklist(
                 project_type=project_type,
                 is_food_service_checkbox=is_food_service_checkbox,
