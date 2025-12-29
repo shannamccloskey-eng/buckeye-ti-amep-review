@@ -12,7 +12,7 @@ from pypdf import PdfReader
 try:
     from reportlab.lib.pagesizes import letter, landscape
     from reportlab.lib import colors
-    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import (
         SimpleDocTemplate,
         Paragraph,
@@ -181,10 +181,17 @@ def parse_markdown_table(md_table: str):
     for i, line in enumerate(lines):
         if not line.startswith("|"):
             continue
-        # Skip separator row (---)
-        if i == 1 and "-" in line.replace("|", ""):
-            continue
+        # Skip separator row (---) by checking for all-dash cells
+        if i == 1:
+            cells = [cell.strip() for cell in line.strip("|").split("|")]
+            if all(set(c) <= {"-", ":"} for c in cells):
+                continue
         parts = [cell.strip() for cell in line.strip("|").split("|")]
+        # Ensure exactly three columns
+        if len(parts) < 3:
+            parts += [""] * (3 - len(parts))
+        elif len(parts) > 3:
+            parts = parts[:3]
         rows.append(parts)
     return rows
 
@@ -197,6 +204,8 @@ def build_geotech_pdf(
     """
     Build a landscape PDF containing the Buckeye logo, title, and the
     geotechnical summary table.
+
+    Column widths are fixed and cells are wrapped to keep everything readable.
     """
     if not REPORTLAB_AVAILABLE:
         raise RuntimeError(
@@ -204,15 +213,16 @@ def build_geotech_pdf(
         )
 
     # Parse table
-    data = parse_markdown_table(md_table)
-    if not data:
-        data = [["Parameter", "Major Structures", "Minor Structures"],
-                ["No data", "No data", "No data"]]
+    raw_data = parse_markdown_table(md_table)
+    if not raw_data:
+        raw_data = [["Parameter", "Major Structures", "Minor Structures"],
+                    ["No data", "No data", "No data"]]
 
     buffer = io.BytesIO()
+    page_size = landscape(letter)
     doc = SimpleDocTemplate(
         buffer,
-        pagesize=landscape(letter),
+        pagesize=page_size,
         leftMargin=36,
         rightMargin=36,
         topMargin=36,
@@ -239,8 +249,32 @@ def build_geotech_pdf(
     story.append(Paragraph(subtitle, styles["Normal"]))
     story.append(Spacer(1, 18))
 
-    # Build table
-    table = Table(data, repeatRows=1)
+    # Convert cells to Paragraphs for word wrapping
+    body_style = ParagraphStyle(
+        "GeoCell",
+        parent=styles["BodyText"],
+        fontSize=9,
+        leading=11,
+    )
+
+    data = []
+    for r_idx, row in enumerate(raw_data):
+        para_row = []
+        for cell in row:
+            # Replace newlines with spaces for nicer wrapping
+            text = (cell or "").replace("\n", " ")
+            para_row.append(Paragraph(text, body_style))
+        data.append(para_row)
+
+    # Determine column widths (3 columns) to fit page width
+    total_width = page_size[0] - doc.leftMargin - doc.rightMargin
+    col_widths = [
+        total_width * 0.28,  # Parameter
+        total_width * 0.36,  # Major
+        total_width * 0.36,  # Minor
+    ]
+
+    table = Table(data, colWidths=col_widths, repeatRows=1)
     orange = colors.HexColor("#c45c26")
 
     table_style = TableStyle(
@@ -248,11 +282,14 @@ def build_geotech_pdf(
             ("BACKGROUND", (0, 0), (-1, 0), orange),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
             ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, 0), 11),
-            ("FONTSIZE", (0, 1), (-1, -1), 10),
             ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
             ("TOPPADDING", (0, 0), (-1, 0), 6),
+            ("FONTSIZE", (0, 1), (-1, -1), 9),
+            ("TOPPADDING", (0, 1), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
         ]
     )
@@ -393,17 +430,8 @@ def main(embed: bool = False):
 
         base_name = Path(uploaded_file.name).stem if uploaded_file else "geotech_report"
 
-        # Download the table as a text file (Markdown)
+        # Build and offer PDF if reportlab is available
         if review_text:
-            download_name_txt = f"{base_name}_buckeye_geotech_summary_table.txt"
-            st.download_button(
-                label="Download Summary Table (.txt)",
-                data=review_text.encode("utf-8"),
-                file_name=download_name_txt,
-                mime="text/plain",
-            )
-
-            # Build and offer PDF if reportlab is available
             if REPORTLAB_AVAILABLE:
                 try:
                     pdf_bytes = build_geotech_pdf(
