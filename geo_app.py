@@ -36,7 +36,7 @@ design parameters for foundations and slabs. Focus on:
   if provided.
 - Any recommendations about the use of Portland cement (e.g., cement-treated
   subgrade, cement content, special mix or treatment), if provided.
-- Other concise, critical geotechnical recommendations that directly affect
+- Any other concise, critical geotechnical recommendations that directly affect
   structural/foundation design.
 
 If a specific value is not provided in the report, clearly state:
@@ -49,7 +49,7 @@ the same value in both columns or note "Same as major" or
 You MUST respond ONLY with a single GitHub-flavored Markdown table in this
 exact format (no headings above or below the table, no narrative):
 
-| Parameter | Major Structures | Minor Structures | Notes / Recommendations |
+| Parameter | Major Structures | Minor Structures |
 
 Where:
 - "Parameter" is one of the following (at minimum):
@@ -63,9 +63,6 @@ Where:
   structures (with units, e.g., ksf, psf, pci, etc.).
 - "Minor Structures" column contains values for minor/site structures, if
   distinct, or "Same as major" / "Not differentiated in report" as applicable.
-- "Notes / Recommendations" contains any brief clarifying notes, including
-  layer/soil type applicability, limitations, or references to specific
-  sections/figures/tables in the report.
 
 Formatting requirements:
 - Include the header row and separator row for a valid Markdown table.
@@ -162,7 +159,7 @@ def main(embed: bool = False):
     """
     if not embed:
         st.set_page_config(
-            page_title="City of Buckeye – Geotechnical Review",
+            page_title="City of Buckeye – Geotechnical Summary",
             layout="wide",
             initial_sidebar_state="collapsed",
         )
@@ -258,11 +255,11 @@ def main(embed: bool = False):
         review_text = result.get("review_text", "").strip()
         usage_summary = result.get("usage", {}) or {}
 
-        # Display the table as rendered Markdown
+        # Display the 3-column table as rendered Markdown
         st.subheader("Geotechnical Summary Table")
         st.markdown(review_text)
 
-        # Optional: show raw text in an expander for copy/paste, if needed
+        # Optional: show raw text for copy/paste
         with st.expander("Show raw table text"):
             st.text_area(
                 "Raw Markdown table",
@@ -270,12 +267,12 @@ def main(embed: bool = False):
                 height=300,
             )
 
-        # Download as text file
+        # Download the table as a text file (Markdown)
         if review_text:
             base_name = Path(uploaded_file.name).stem
-            download_name = f"{base_name}_buckeye_geotech_summary.txt"
+            download_name = f"{base_name}_buckeye_geotech_summary_table.txt"
             st.download_button(
-                label="Download Geotechnical Summary (.txt)",
+                label="Download Summary Table (.txt)",
                 data=review_text.encode("utf-8"),
                 file_name=download_name,
                 mime="text/plain",
