@@ -23,115 +23,56 @@ You are given the text of a geotechnical report (and possibly a short
 project description from the reviewer). Use only the information in the
 report itself and the project description. Do NOT invent data.
 
-Your tasks:
+Your goal is to produce a SHORT, TABLE-ONLY SUMMARY capturing the key
+design parameters for foundations and slabs. Focus on:
 
-1) Project & Site Summary
-   • Briefly summarize the project type, location (as described in the report),
-     and general scope of the geotechnical investigation.
-   • Summarize subsurface conditions: soil/rock types, layering, groundwater
-     conditions, and any notable geologic hazards (expansive soils, collapsible
-     soils, liquefaction potential, flood hazards, etc.).
+- Soil type / classification.
+- Allowable bearing soil capacity for MAJOR structures (main buildings,
+  primary structural elements).
+- Allowable bearing soil capacity for MINOR structures (site walls, canopies,
+  small accessory structures, sign foundations, etc.) if distinctly addressed.
+- Recommended footing depth / embedment for MAJOR and MINOR structures.
+- Coefficient of subgrade modulus (k-value) for slabs-on-grade or foundations,
+  if provided.
+- Any recommendations about the use of Portland cement (e.g., cement-treated
+  subgrade, cement content, special mix or treatment), if provided.
+- Other concise, critical geotechnical recommendations that directly affect
+  structural/foundation design.
 
-2) Extract Key Geotechnical Design Parameters
-   Extract and clearly list any of the following that are provided in the report.
-   Use the exact values and units from the report, or state "Not provided" if
-   the report does not give them. If multiple values or ranges are given, list
-   them all with context.
+If a specific value is not provided in the report, clearly state:
+"Not provided in report."
 
-   • Soil classification (USCS and/or AASHTO) for each major stratum.
-   • Recommended allowable bearing pressures for:
-       - spread footings
-       - mat foundations (if applicable)
-       - drilled piers/caissons (if applicable)
-   • Coefficient of subgrade modulus (k-value) for slabs-on-grade and foundations,
-     including whether it is for static or dynamic loading, and the assumed
-     subgrade improvement (if any).
-   • Recommended values for:
-       - friction angle (φ) and cohesion (c), if provided
-       - lateral earth pressure coefficients (at-rest, active, passive) and any
-         corresponding equivalent fluid pressures
-       - soil unit weights (total and submerged)
-       - estimated total and differential settlement for typical foundation loads
-   • Groundwater level(s) and seasonal variation, if discussed.
-   • Seismic site class and seismic parameters (e.g., Site Class, Ss, S1,
-     Fa, Fv, SDS, SD1) if given, and any references to ASCE 7-22 or IBC 2024.
-   • Any special recommendations for slabs-on-grade, pavements, retaining walls,
-     shoring, or temporary excavations.
-   • Any construction considerations: compaction requirements, fill materials,
-     overexcavation depths, moisture conditioning, etc.
+If the report does not distinguish between major and minor structures, use
+the same value in both columns or note "Same as major" or
+"Not differentiated in report" as appropriate.
 
-   Present these in a clear, structured format (such as a labeled bullet list
-   or a simple Markdown table), grouped under headings like:
-   "Soil Profile", "Foundation Design Parameters", "Seismic Parameters",
-   "Lateral Earth Pressures", "Groundwater", and "Construction Recommendations".
+You MUST respond ONLY with a single GitHub-flavored Markdown table in this
+exact format (no headings above or below the table, no narrative):
 
-3) Code & Standards Alignment (High-Level)
-   Based on the report text, indicate whether the report references current
-   design standards such as:
-   • 2024 IBC
-   • ASCE 7-22
-   • ACI 318-19
-   • NDS 2024
-   • City of Buckeye or other local codes/amendments
-   • Any other standards explicitly mentioned in the report
+| Parameter | Major Structures | Minor Structures | Notes / Recommendations |
 
-   Do NOT quote code text. Simply list the standards and year as written
-   in the report and note any obvious mismatches in code year (for example,
-   if the report references an older edition).
-
-4) Registered Professional / Firm Information
-   From the report, identify and extract:
-   • Name of the geotechnical engineer of record.
-   • License type and number, if shown (e.g., P.E., R.G., Geotechnical Engineer).
-   • Name of the firm.
-   • Signature and seal information (e.g., “signed and sealed”, any dates).
-   • Report date and any revision dates.
-
-   Then provide a short "License Verification Notes" section:
-   • Confirm whether the report provides enough information (name and license
-     number) to verify the geotechnical engineer with the Arizona Board of
-     Technical Registration (AZBTR).
-   • If name and/or license number are missing or unclear, explicitly flag this
-     as a discrepancy.
-   • IMPORTANT: You do NOT have direct access to external websites or live
-     databases. You must NOT claim that you have actually verified the license.
-     Instead, instruct the plan reviewer to confirm the license status using
-     the AZBTR online register at the Arizona Board of Technical Registration
-     website (https://azbtr.portalus.thentiacloud.net/webs/portal/register/#/).
-
-   Example language:
-   “The report lists John Doe, P.E. #12345 as the geotechnical engineer of
-    record. The plan reviewer should verify this license in the AZBTR online
-    register before approval.”
-
-5) Discrepancy List (Geotechnical-Focused)
-   Create a concise list of potential issues or missing items that a City of
-   Buckeye reviewer should be aware of. Each item should be one bullet and
-   should be clear and actionable. Focus on:
-   • Missing or unclear soil classifications or design parameters.
-   • Missing or inconsistent allowable bearing pressures or k-values.
-   • Missing seismic site class or seismic parameters where they would be
-     expected for building design.
-   • Conflicting recommendations within the report.
-   • Missing information on groundwater, settlement, or lateral pressures when
-     those are relevant to the described project.
-   • Missing or incomplete registered professional information (name, license
-     number, seal, signature, date).
-
-6) Final Summary & Determination
-   Provide a short final narrative for the City of Buckeye reviewer:
-   • Overall adequacy of the geotechnical report for use in structural and
-     foundation design (e.g., “appears adequate”, “appears adequate with
-     noted clarifications”, or “additional information recommended”).
-   • Any specific follow-up items the reviewer should request from the design
-     team or geotechnical engineer.
+Where:
+- "Parameter" is one of the following (at minimum):
+    • Soil type / classification
+    • Allowable bearing capacity
+    • Footing depth / embedment
+    • Subgrade modulus (k-value)
+    • Portland cement recommendation
+    • Other key geotechnical recommendations
+- "Major Structures" column contains values for the main building or primary
+  structures (with units, e.g., ksf, psf, pci, etc.).
+- "Minor Structures" column contains values for minor/site structures, if
+  distinct, or "Same as major" / "Not differentiated in report" as applicable.
+- "Notes / Recommendations" contains any brief clarifying notes, including
+  layer/soil type applicability, limitations, or references to specific
+  sections/figures/tables in the report.
 
 Formatting requirements:
-• Use clear headings and bullet points.
-• When listing numeric values, always include units exactly as stated in the
-  report (e.g., psf, ksf, pci, pcf, kN/m³).
-• Do NOT fabricate any values that are not in the report. If a value is not
-  given, explicitly state “Not provided in report.”
+- Include the header row and separator row for a valid Markdown table.
+- Use clear, concise text in each cell.
+- Always show units exactly as written in the report (psf, ksf, pci, pcf, etc.).
+- Do NOT fabricate any values. If not stated, write "Not provided in report."
+- Do NOT include any text outside the table.
 """
 
 
@@ -226,23 +167,19 @@ def main(embed: bool = False):
             initial_sidebar_state="collapsed",
         )
 
-    st.title("City of Buckeye – Geotechnical Review")
+    st.title("City of Buckeye – Geotechnical Summary")
     st.caption(f"Model: `{MODEL_NAME}`")
 
     st.write(
-        "Upload a geotechnical report PDF to generate a structured summary of "
-        "soil profile, allowable bearing pressures, k-values, seismic site "
-        "class, and other key design parameters. The tool also extracts "
-        "registered professional information and reminds the reviewer to verify "
-        "licenses in the Arizona Board of Technical Registration (AZBTR) online registry."
+        "Upload a geotechnical report PDF to generate a concise summary table of "
+        "soil type, allowable bearing capacities, footing depths for major and "
+        "minor structures, k-values (subgrade modulus), and any Portland cement "
+        "recommendations directly affecting foundation design."
     )
 
     st.info(
-        "Workflow:\n"
-        "1. Upload the geotechnical report PDF.\n"
-        "2. Optionally enter a brief project description.\n"
-        "3. Run the geotechnical review to generate a structured summary and "
-        "geotech-focused discrepancy list."
+        "This tool is intended as a summary aid for plan review. It does not "
+        "replace a full engineering evaluation of the geotechnical report."
     )
 
     env_api_key = os.environ.get("OPENAI_API_KEY", "")
@@ -264,16 +201,17 @@ def main(embed: bool = False):
     project_description = st.text_area(
         "Optional project description",
         placeholder=(
-            "Example: 2-story Type IIB medical office building; shallow spread "
-            "footings and slab-on-grade assumed; no below-grade parking."
+            "Example: Retail shell building with slab-on-grade and shallow "
+            "spread footings; minor structures include screen walls and "
+            "site signage."
         ),
     )
 
-    run_button = st.button("Run Geotechnical Review", type="primary")
+    run_button = st.button("Run Geotechnical Summary", type="primary")
 
     if run_button:
         if not uploaded_file:
-            st.error("Please upload a geotechnical report PDF before running the review.")
+            st.error("Please upload a geotechnical report PDF before running the summary.")
             st.stop()
 
         progress_bar = st.progress(0)
@@ -296,7 +234,7 @@ def main(embed: bool = False):
                 return
 
             progress_bar.progress(50)
-            status_placeholder.text("Calling OpenAI model for geotechnical review...")
+            status_placeholder.text("Calling OpenAI model for geotechnical summary...")
 
             result = run_geotech_review(
                 client=client,
@@ -305,9 +243,9 @@ def main(embed: bool = False):
             )
 
             progress_bar.progress(100)
-            status_placeholder.text("Geotechnical review complete.")
+            status_placeholder.text("Geotechnical summary complete.")
         except Exception as e:
-            st.error(f"Error during geotechnical review: {e}")
+            st.error(f"Error during geotechnical summary: {e}")
             return
         finally:
             try:
@@ -315,34 +253,41 @@ def main(embed: bool = False):
             except OSError:
                 pass
 
-        st.success("Geotechnical review complete.")
+        st.success("Geotechnical summary complete.")
 
         review_text = result.get("review_text", "").strip()
         usage_summary = result.get("usage", {}) or {}
 
-        st.subheader("Geotechnical Review Summary")
-        st.text_area(
-            "Review output",
-            value=review_text,
-            height=500,
-        )
+        # Display the table as rendered Markdown
+        st.subheader("Geotechnical Summary Table")
+        st.markdown(review_text)
 
+        # Optional: show raw text in an expander for copy/paste, if needed
+        with st.expander("Show raw table text"):
+            st.text_area(
+                "Raw Markdown table",
+                value=review_text,
+                height=300,
+            )
+
+        # Download as text file
         if review_text:
             base_name = Path(uploaded_file.name).stem
-            download_name = f"{base_name}_buckeye_geotech_review.txt"
+            download_name = f"{base_name}_buckeye_geotech_summary.txt"
             st.download_button(
-                label="Download Geotechnical Review (.txt)",
+                label="Download Geotechnical Summary (.txt)",
                 data=review_text.encode("utf-8"),
                 file_name=download_name,
                 mime="text/plain",
             )
 
+        # Show token usage if available
         if usage_summary:
             st.subheader("Token usage (if reported by API)")
             st.json(usage_summary)
 
         st.caption(
-            "This tool summarizes the geotechnical report for plan review support. "
+            "This tool summarizes key geotechnical design parameters for plan review. "
             "It does not replace the professional judgment of a registered engineer. "
             "License status of the geotechnical engineer of record must be verified "
             "directly in the Arizona Board of Technical Registration online register "
