@@ -95,6 +95,60 @@ Formatting requirements:
 
 
 # ---------------- HELPERS ----------------
+def save_feedback_csv(
+    csv_path: Path,
+    tool_name: str,
+    run_id: str,
+    filename: str,
+    rating: str,
+    comments: str,
+    extra: Optional[Dict[str, Any]] = None,
+) -> None:
+    """
+    Append a single feedback record to a CSV file.
+
+    - csv_path: Path to CSV file (e.g., feedback_ti_amep.csv)
+    - tool_name: Short name of the tool ("TI_AMEP", "GEO_SUMMARY", etc.)
+    - run_id: Unique id per run (e.g., ISO timestamp or uuid)
+    - filename: Source PDF file name
+    - rating: e.g., 'Looks good', 'Mostly okay', 'Needs corrections'
+    - comments: Free-form reviewer comments
+    - extra: Optional dict for extra metadata (tokens, model, etc.)
+    """
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    is_new = not csv_path.exists()
+
+    fieldnames = [
+        "timestamp_utc",
+        "tool_name",
+        "run_id",
+        "filename",
+        "rating",
+        "comments",
+    ]
+
+    extra = extra or {}
+    for k in extra.keys():
+        if k not in fieldnames:
+            fieldnames.append(k)
+
+    timestamp = datetime.datetime.utcnow().isoformat()
+
+    row: Dict[str, Any] = {
+        "timestamp_utc": timestamp,
+        "tool_name": tool_name,
+        "run_id": run_id,
+        "filename": filename,
+        "rating": rating,
+        "comments": comments,
+    }
+    row.update(extra)
+
+    with csv_path.open("a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if is_new:
+            writer.writeheader()
+        writer.writerow(row)
 
 def get_client(api_key: str) -> OpenAI:
     return OpenAI(api_key=api_key)
