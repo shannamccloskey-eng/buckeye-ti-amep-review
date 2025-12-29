@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import tempfile
 
 import streamlit as st
@@ -8,9 +8,17 @@ from openai import OpenAI
 from pypdf import PdfReader
 
 from reportlab.lib.pagesizes import letter, landscape
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    Image as RLImage,
+)
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.lib import colors
 
 
 # ---------------- CONFIG ----------------
@@ -74,6 +82,8 @@ and closing statement.
 """
 
 
+# ---------------- PDF / TEXT HELPERS ----------------
+
 def extract_pdf_text(pdf_path: str) -> str:
     reader = PdfReader(pdf_path)
     all_text: List[str] = []
@@ -102,7 +112,11 @@ def _split_paragraphs_from_lines(lines: List[str]) -> List[str]:
 def _extract_markdown_table(
     all_lines: List[str],
     header_prefix: str = "| Sheet Reference",
-) -> (List[str], List[str], List[str]):
+) -> Tuple[List[str], List[str], List[str]]:
+    """
+    Locate the Markdown discrepancy table inside the AI output and
+    return (pre_lines, table_lines, post_lines).
+    """
     header_index: Optional[int] = None
     for i, line in enumerate(all_lines):
         if line.strip().startswith(header_prefix):
@@ -130,6 +144,9 @@ def _extract_markdown_table(
 
 
 def _markdown_table_to_data(table_lines: List[str]) -> List[List[str]]:
+    """
+    Convert the GitHub-flavored discrepancy table into a 2D list of strings.
+    """
     if not table_lines:
         return []
 
@@ -137,6 +154,7 @@ def _markdown_table_to_data(table_lines: List[str]) -> List[List[str]]:
     if len(lines) < 2:
         return []
 
+    # Skip header & separator; data starts after that
     data_lines = lines[2:]
 
     table_data: List[List[str]] = []
@@ -155,7 +173,21 @@ def _markdown_table_to_data(table_lines: List[str]) -> List[List[str]]:
     return table_data
 
 
-def save_text_as_pdf(text: str, pdf_path: Path) -> None:
+def save_text_as_pdf(
+    text: str,
+    pdf_path: Path,
+    original_filename: str,
+    logo_name: str = "City of Buckeye 2025.png",
+) -> None:
+    """
+    Create a Buckeye-branded landscape PDF with:
+    - Logo (if present)
+    - Title: City of Buckeye – TI AMEP Review
+    - Subtitle with original TI plan-set filename
+    - Discrepancy table as a wrapped landscape table
+
+    If no table is detected, falls back to paragraphs.
+    """
     stylesheet = getSampleStyleSheet()
     normal_style = stylesheet["Normal"]
 
@@ -175,6 +207,24 @@ def save_text_as_pdf(text: str, pdf_path: Path) -> None:
 
     story: List[Any] = []
 
+    # ---- Header: logo + title + subtitle ----
+    logo_path = Path(__file__).parent / logo_name
+    if logo_path.exists():
+        img = RLImage(str(logo_path))
+        img.drawHeight = 50
+        img.drawWidth = 150
+        story.append(img)
+        story.append(Spacer(1, 8 * mm))
+
+    title = "City of Buckeye – TI AMEP Review"
+    story.append(Paragraph(title, stylesheet["Title"]))
+    story.append(Spacer(1, 3 * mm))
+
+    subtitle = f"Review generated from TI plan set: {original_filename}"
+    story.append(Paragraph(subtitle, normal_style))
+    story.append(Spacer(1, 8 * mm))
+
+    # ---- Discrepancy table (preferred) ----
     if table_data_raw:
         header_row = [
             "Sheet Reference",
@@ -184,12 +234,16 @@ def save_text_as_pdf(text: str, pdf_path: Path) -> None:
             "Required Correction",
         ]
 
-        cell_style = normal_style.clone("TableCell")
-        cell_style.fontSize = 8
-        cell_style.leading = 10
+        # Smaller font + wrapping paragraph style
+        cell_style = ParagraphStyle(
+            "TableCell",
+            parent=normal_style,
+            fontSize=8,
+            leading=10,
+        )
 
         def make_cell(content: str) -> Paragraph:
-            content = (content or "").replace("■", "-")
+            content = (content or "").replace("■", "-").replace("\n", " ")
             return Paragraph(content, cell_style)
 
         full_table_data: List[List[Any]] = []
@@ -202,39 +256,63 @@ def save_text_as_pdf(text: str, pdf_path: Path) -> None:
                 row = row[:5]
             full_table_data.append([make_cell(c) for c in row])
 
+        # Column widths proportional to page width
+        total_width = pagesize[0] - doc.leftMargin - doc.rightMargin
         col_widths = [
-            30 * mm,
-            25 * mm,
-            90 * mm,
-            30 * mm,
-            60 * mm,
+            total_width * 0.11,  # Sheet Ref
+            total_width * 0.12,  # Discipline
+            total_width * 0.43,  # Description
+            total_width * 0.12,  # Code Section
+            total_width * 0.22,  # Required Correction
         ]
 
         table = Table(full_table_data, colWidths=col_widths, repeatRows=1)
+
+        header_color = colors.HexColor("#c45c26")
         table.setStyle(
             TableStyle(
                 [
-                    ("GRID", (0, 0), (-1, -1), 0.5, "black"),
-                    ("BACKGROUND", (0, 0), (-1, 0), "#DDDDDD"),
+                    ("BACKGROUND", (0, 0), (-1, 0), header_color),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
                     ("ALIGN", (0, 0), (-1, 0), "CENTER"),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 9),
+                    ("BOTTOMPADDING", (0, 0), (-1, 0), 5),
+                    ("TOPPADDING", (0, 0), (-1, 0), 4),
+                    ("FONTSIZE", (0, 1), (-1, -1), 8),
+                    ("TOPPADDING", (0, 1), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 1), (-1, -1), 3),
                     ("LEFTPADDING", (0, 0), (-1, -1), 3),
                     ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-                    ("TOPPADDING", (0, 0), (-1, -1), 3),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
                 ]
             )
         )
 
+        # Light row striping for readability
+        for r_idx in range(1, len(full_table_data)):
+            if r_idx % 2 == 0:
+                table.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, r_idx), (-1, r_idx), colors.whitesmoke),
+                        ]
+                    )
+                )
+
         story.append(table)
 
     else:
+        # Fallback: just dump paragraphs (still with header + logo)
         for para in _split_paragraphs_from_lines(all_lines):
             story.append(Paragraph(para, normal_style))
             story.append(Spacer(1, 4 * mm))
 
     doc.build(story)
 
+
+# ---------------- OPENAI PIPELINE ----------------
 
 def call_buckeye_ti_amep_single(
     client: OpenAI,
@@ -324,6 +402,8 @@ def run_review_pipeline_single(
 
     return review_text, usage_summary
 
+
+# ---------------- STREAMLIT UI ----------------
 
 def main(embed: bool = False):
     """
@@ -428,7 +508,11 @@ def main(embed: bool = False):
             ) as out_tmp:
                 out_pdf_path = Path(out_tmp.name)
 
-            save_text_as_pdf(review_text, out_pdf_path)
+            save_text_as_pdf(
+                review_text,
+                out_pdf_path,
+                original_filename=main_file.name,
+            )
 
             with open(out_pdf_path, "rb") as f:
                 pdf_bytes = f.read()
