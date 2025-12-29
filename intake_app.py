@@ -1,21 +1,39 @@
 import os
-import json
-from pathlib import Path
-from typing import Optional, Dict, Any, List
-import tempfile
 import csv
 import datetime
+from pathlib import Path
+from typing import Optional, Dict, Any, List, Tuple
+import tempfile
 
 import streamlit as st
 from openai import OpenAI
 from pypdf import PdfReader
 
+from reportlab.lib.pagesizes import letter, landscape
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    Image as RLImage,
+)
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.lib import colors
+
+
 # ---------------- CONFIG ----------------
 
-MODEL_NAME = "gpt-5.1"  # OpenAI API model ID
+MODEL_NAME = "gpt-4.1"
 
 
-# ---------------- PDF UTILITIES ----------------
+def get_client(api_key: str) -> OpenAI:
+    return OpenAI(api_key=api_key)
+
+
+# ---------------- FEEDBACK HELPER ----------------
+
 def save_feedback_csv(
     csv_path: Path,
     tool_name: str,
@@ -25,17 +43,6 @@ def save_feedback_csv(
     comments: str,
     extra: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """
-    Append a single feedback record to a CSV file.
-
-    - csv_path: Path to CSV file (e.g., feedback_ti_amep.csv)
-    - tool_name: Short name of the tool ("TI_AMEP", "GEO_SUMMARY", etc.)
-    - run_id: Unique id per run (e.g., ISO timestamp or uuid)
-    - filename: Source PDF file name
-    - rating: e.g., 'Looks good', 'Mostly okay', 'Needs corrections'
-    - comments: Free-form reviewer comments
-    - extra: Optional dict for extra metadata (tokens, model, etc.)
-    """
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     is_new = not csv_path.exists()
 
@@ -72,338 +79,347 @@ def save_feedback_csv(
         writer.writerow(row)
 
 
-def extract_pdf_text(pdf_path: str) -> str:
-    """
-    Extract text from all pages of a PDF.
-    """
-    reader = PdfReader(pdf_path)
-    all_text = []
-    for page in reader.pages:
-        page_text = page.extract_text() or ""
-        all_text.append(page_text)
-    return "\n\n".join(all_text)
+# ---------------- PROMPT ----------------
 
+BUCKEYE_INTAKE_PROMPT = """
+You are a City of Buckeye Building Safety Plans Examiner performing an
+INTAKE COMPLETENESS REVIEW for a COMMERCIAL building plan submittal.
 
-# ---------------- OPENAI HELPERS ----------------
+This is an INTAKE review only:
+- Focus on whether required documents and information are present.
+- Do NOT perform deep structural or detailed code checks.
+- Assume 2024 IBC, 2018 IECC, and City of Buckeye amendments are in effect,
+  but you should NOT quote code text.
 
-def get_client(api_key: str) -> OpenAI:
-    return OpenAI(api_key=api_key)
+You are given:
+- The extracted text of the submitted plan set.
+- An optional project description entered by the reviewer.
 
-
-def analyze_plans_for_food_service(
-    client: OpenAI,
-    full_pdf_text: str,
-    project_type: str,
-) -> Dict[str, Any]:
-    """
-    Use GPT to scan the full plan text for food-service signals and specific items.
-    """
-    user_prompt = f"""
-You are assisting the City of Buckeye Building Department with COMMERCIAL PLAN INTAKE
-for a project type: "{project_type}".
-
-The uploaded PDF text below is the full plan set (architectural + MEP, etc.).
 Your tasks:
 
-1) Determine whether the plans clearly indicate a FOOD SERVICE use
-   (restaurant, bar, commercial kitchen, coffee shop, bakery, etc.).
-2) For food-service related equipment, indicate whether the plans show or
-   reference ANY of the following:
-   - grease interceptor (interceptor, grease trap, grease waste, etc.)
-   - walk-in cooler
-   - walk-in freezer
-   - cooking hood (Type I or II, exhaust hood, kitchen hood, etc.)
-   - IECC / energy-code compliance details (lighting, envelope, mechanical).
+1) Project & Scope Summary
+   • Briefly describe the project (occupancy, stories, construction type if known).
+   • Identify whether it appears to involve food service or hazardous uses.
+   • Summarize any special features (e.g., new restrooms, mezzanines, commercial kitchen).
 
-Return ONLY valid JSON in this exact format (no commentary):
+2) Intake Completeness Table
+   Create a GitHub-flavored Markdown table with EXACTLY these columns:
 
-{{
-  "is_food_service_by_plans": true/false,
-  "found_items": {{
-    "grease_interceptor": true/false,
-    "walk_in_cooler": true/false,
-    "walk_in_freezer": true/false,
-    "hood": true/false,
-    "iecc_energy_code": true/false
-  }},
-  "notes": "short explanation of what you saw in the plans"
-}}
+   | Item | Required? | Provided? | Comments / Required Action |
 
-PDF_PLAN_TEXT_START
-{full_pdf_text[:120000]}
-PDF_PLAN_TEXT_END
+   Include rows for the typical commercial submittal items, such as:
+   - Application / cover sheet information (address, APN, contacts).
+   - Code analysis (occupancy, construction type, allowable area, fire protection).
+   - Site plan / civil plan.
+   - Architectural floor plans & RCP.
+   - Building elevations & sections.
+   - Structural plans (foundation, framing, details).
+   - Structural calculations.
+   - Truss / joist / delegated design submittals (if applicable).
+   - Geotechnical / soil report (if applicable).
+   - Mechanical plans / schedules.
+   - Plumbing plans / isometrics.
+   - Electrical power / lighting plans.
+   - Energy compliance (COMcheck or equivalent).
+   - Fire protection (sprinkler/standpipe) shop drawings (if applicable).
+   - Fire alarm drawings (if applicable).
+   - Accessibility details (restrooms, parking, routes).
+   - Special inspections statement / schedule (if applicable).
+   - Other supporting documents clearly referenced in the set.
+
+   For each row:
+   - "Required?": Yes / No / Maybe (if dependent on scope).
+   - "Provided?": Yes / No / Unclear from plans.
+   - "Comments / Required Action": Short, directive language such as
+     "Provide structural calculations for new steel canopy" or
+     "Fire alarm shop drawings to be deferred submittal; note on cover sheet."
+
+3) Intake Determination
+   At the end of the report (after the table), provide a short narrative
+   "Intake Determination" stating whether the submittal appears:
+   - "Intake complete – OK to route for full review", or
+   - "Intake incomplete – additional items required before routing", with a
+     brief list of the highest-priority missing items.
+
+Formatting:
+- The table MUST appear in the response exactly once, with the header row
+  and separator row, in GitHub-flavored Markdown.
+- You may include short narrative text before and after the table, but the
+  table must be easy to locate.
 """
 
-    response = client.responses.create(
-        model=MODEL_NAME,
-        instructions=(
-            "You are assisting City of Buckeye intake staff. "
-            "Follow the user instructions carefully and respond with STRICT JSON only."
-        ),
-        input=user_prompt,
-    )
 
-    raw_text = response.output_text.strip()
+# ---------------- PDF / TABLE HELPERS ----------------
 
-    try:
-        data = json.loads(raw_text)
-    except Exception:
-        data = {
-            "is_food_service_by_plans": False,
-            "found_items": {
-                "grease_interceptor": False,
-                "walk_in_cooler": False,
-                "walk_in_freezer": False,
-                "hood": False,
-                "iecc_energy_code": False,
-            },
-            "notes": "Model response could not be parsed as JSON. Treating as no food-service items detected.",
-        }
-
-    found = data.get("found_items", {}) or {}
-    defaults = {
-        "grease_interceptor": False,
-        "walk_in_cooler": False,
-        "walk_in_freezer": False,
-        "hood": False,
-        "iecc_energy_code": False,
-    }
-    merged_found = {k: bool(found.get(k, v)) for k, v in defaults.items()}
-
-    return {
-        "is_food_service_by_plans": bool(data.get("is_food_service_by_plans", False)),
-        "found_items": merged_found,
-        "notes": data.get("notes", ""),
-    }
+def extract_pdf_text(pdf_path: str) -> str:
+    reader = PdfReader(pdf_path)
+    all_text: List[str] = []
+    for page in reader.pages:
+        page_text = page.extract_text() or ""
+        if page_text.strip():
+            all_text.append(page_text)
+    return "\n\n".join(all_text).strip()
 
 
-def classify_support_doc(
-    client: OpenAI,
-    doc_text: str,
-    filename: str,
-) -> Dict[str, Any]:
-    """
-    Classify a single supporting document into the known document types.
-    """
-    user_prompt = f"""
-You are assisting City of Buckeye Building Department with COMMERCIAL PLAN INTAKE.
-
-A single supporting document has been uploaded with filename: "{filename}".
-
-Based on the text content provided, classify whether this document is any of
-the following types (multiple may be true):
-
-- geotech_report: geotechnical / soils report
-- deferred_truss_form: deferred truss submittal form or truss design summary
-- special_inspections_form: special inspections statement, schedule, or agreement
-- struct_calcs: structural calculations (beams, columns, foundations, etc.)
-- struct_sheets: separate structural sheets or structural framing plans
-- grease_interceptor: grease interceptor details, sizing, or shop drawings
-- walk_in_cooler: walk-in cooler submittal, cut sheet, or layout
-- walk_in_freezer: walk-in freezer submittal, cut sheet, or layout
-- hood_specs: hood specifications, hood schedule, or hood shop drawings
-- iecc_docs: IECC / energy code compliance forms, COMcheck, or similar
-
-Return ONLY valid JSON in this exact format (no commentary):
-
-{{
-  "doc_types": {{
-    "geotech_report": true/false,
-    "deferred_truss_form": true/false,
-    "special_inspections_form": true/false,
-    "struct_calcs": true/false,
-    "struct_sheets": true/false,
-    "grease_interceptor": true/false,
-    "walk_in_cooler": true/false,
-    "walk_in_freezer": true/false,
-    "hood_specs": true/false,
-    "iecc_docs": true/false
-  }},
-  "notes": "short explanation of your classification"
-}}
-
-DOC_TEXT_START
-{doc_text[:40000]}
-DOC_TEXT_END
-"""
-
-    response = client.responses.create(
-        model=MODEL_NAME,
-        instructions=(
-            "You are assisting City of Buckeye intake staff. "
-            "Follow the user instructions carefully and respond with STRICT JSON only."
-        ),
-        input=user_prompt,
-    )
-
-    raw_text = response.output_text.strip()
-    try:
-        data = json.loads(raw_text)
-    except Exception:
-        data = {
-            "doc_types": {},
-            "notes": "Could not parse model output as JSON.",
-        }
-
-    defaults = {
-        "geotech_report": False,
-        "deferred_truss_form": False,
-        "special_inspections_form": False,
-        "struct_calcs": False,
-        "struct_sheets": False,
-        "grease_interceptor": False,
-        "walk_in_cooler": False,
-        "walk_in_freezer": False,
-        "hood_specs": False,
-        "iecc_docs": False,
-    }
-    found_types = data.get("doc_types", {}) or {}
-    merged = {k: bool(found_types.get(k, v)) for k, v in defaults.items()}
-
-    return {
-        "doc_types": merged,
-        "notes": data.get("notes", ""),
-    }
-
-
-# ---------------- INTAKE LOGIC ----------------
-
-DOC_LABELS = {
-    "completed_application": "Completed Permit Application",
-    "arch_set": "Architectural Plan Set",
-    "mep_set": "MEP Plan Set (Mechanical, Electrical, Plumbing)",
-    "geotech_report": "Geotechnical Report",
-    "deferred_truss_form": "Deferred Truss Submittal Form",
-    "special_inspections_form": "Special Inspections Form",
-    "struct_calcs": "Structural Calculations",
-    "struct_sheets": "Structural Sheets",
-    "grease_interceptor": "Grease Interceptor Details/Submittal",
-    "walk_in_cooler": "Walk-in Cooler Submittal/Details",
-    "walk_in_freezer": "Walk-in Freezer Submittal/Details",
-    "hood_specs": "Hood Specifications / Hood Schedule",
-    "iecc_docs": "IECC / Energy Code Compliance Documentation",
-}
-
-
-def build_intake_checklist(
-    project_type: str,
-    is_food_service_checkbox: bool,
-    plan_analysis: Dict[str, Any],
-    ai_detected_docs: Dict[str, bool],
-    doc_sources: Dict[str, List[str]],
-) -> Dict[str, Any]:
-    rows = []
-
-    def add_row(code: str, required: bool, note: str = ""):
-        label = DOC_LABELS.get(code, code)
-        provided = bool(ai_detected_docs.get(code, False))
-        if required and not provided:
-            status = "MISSING – Required for intake"
-        elif required and provided:
-            status = "Provided – Required"
-        elif (not required) and provided:
-            status = "Provided – Not strictly required"
+def _split_paragraphs_from_lines(lines: List[str]) -> List[str]:
+    paragraphs: List[str] = []
+    buffer: List[str] = []
+    for line in lines:
+        if line.strip() == "":
+            if buffer:
+                paragraphs.append(" ".join(buffer).strip())
+                buffer = []
         else:
-            status = "Not required"
+            buffer.append(line.strip())
+    if buffer:
+        paragraphs.append(" ".join(buffer).strip())
+    return paragraphs
 
-        src_files = doc_sources.get(code, [])
-        src_note = ""
-        if src_files:
-            src_note = f"Provided in file(s): {', '.join(src_files)}"
-            if note:
-                note = note + " " + src_note
-            else:
-                note = src_note
 
-        rows.append(
-            {
-                "code": code,
-                "document": label,
-                "required": required,
-                "provided": provided,
-                "status": status,
-                "notes": note,
-            }
-        )
+def _extract_markdown_table(
+    all_lines: List[str],
+    header_prefix: str = "| Item | Required?",
+) -> Tuple[List[str], List[str], List[str]]:
+    header_index: Optional[int] = None
+    for i, line in enumerate(all_lines):
+        if line.strip().startswith(header_prefix):
+            header_index = i
+            break
 
-    # Always-required docs
-    add_row("completed_application", required=True, note="Verified by intake staff from application submittal.")
-    add_row("arch_set", required=True, note="Typically included within the main plan PDF.")
-    add_row("mep_set", required=True, note="Typically included within the main plan PDF.")
+    if header_index is None:
+        return all_lines, [], []
 
-    # Shell / ground-up extras
-    if project_type in ("Shell Building", "Ground-Up"):
-        add_row("geotech_report", True)
-        add_row("deferred_truss_form", True)
-        add_row("special_inspections_form", True)
-        add_row("struct_calcs", True)
-        add_row("struct_sheets", True)
+    pre_lines = all_lines[:header_index]
 
-    # Food-service-driven docs
-    analysis_food = bool(plan_analysis.get("is_food_service_by_plans", False))
-    found_food_items = plan_analysis.get("found_items", {}) or {}
-    any_food_feature = any(found_food_items.values())
+    table_lines: List[str] = []
+    for line in all_lines[header_index:]:
+        stripped = line.strip()
+        if not stripped:
+            break
+        if stripped.startswith("|"):
+            table_lines.append(line)
+        else:
+            break
 
-    is_food_context = (
-        (project_type in ("Ground-Up", "Tenant Improvement (TI)"))
-        and (is_food_service_checkbox or analysis_food or any_food_feature)
+    post_start = header_index + len(table_lines)
+    post_lines = all_lines[post_start:]
+    return pre_lines, table_lines, post_lines
+
+
+def _markdown_table_to_data(table_lines: List[str]) -> List[List[str]]:
+    if not table_lines:
+        return []
+
+    lines = [ln for ln in table_lines if ln.strip()]
+    if len(lines) < 2:
+        return []
+
+    data_lines = lines[2:]  # skip header + separator
+
+    table_data: List[List[str]] = []
+    for line in data_lines:
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            break
+        row_cells = [cell.strip() for cell in stripped.split("|")]
+        while row_cells and row_cells[0] == "":
+            row_cells.pop(0)
+        while row_cells and row_cells[-1] == "":
+            row_cells.pop()
+        if row_cells:
+            table_data.append(row_cells)
+
+    return table_data
+
+
+def save_text_as_pdf(
+    text: str,
+    pdf_path: Path,
+    original_filename: str,
+    logo_name: str = "City of Buckeye 2025.png",
+) -> None:
+    """
+    Buckeye-branded intake PDF with logo, title, subtitle, and
+    wrapped intake completeness table.
+    """
+    stylesheet = getSampleStyleSheet()
+    normal_style = stylesheet["Normal"]
+
+    all_lines = text.splitlines()
+    _, table_lines, _ = _extract_markdown_table(all_lines)
+    table_data_raw = _markdown_table_to_data(table_lines) if table_lines else []
+
+    pagesize = landscape(letter)
+    doc = SimpleDocTemplate(
+        str(pdf_path),
+        pagesize=pagesize,
+        leftMargin=20 * mm,
+        rightMargin=20 * mm,
+        topMargin=15 * mm,
+        bottomMargin=15 * mm,
     )
 
-    if is_food_context:
-        base_note = "Required if plans show this food-service equipment or system."
-        add_row(
-            "grease_interceptor",
-            required=bool(found_food_items.get("grease_interceptor", False)),
-            note=base_note,
-        )
-        add_row(
-            "walk_in_cooler",
-            required=bool(found_food_items.get("walk_in_cooler", False)),
-            note=base_note,
-        )
-        add_row(
-            "walk_in_freezer",
-            required=bool(found_food_items.get("walk_in_freezer", False)),
-            note=base_note,
-        )
-        add_row(
-            "hood_specs",
-            required=bool(found_food_items.get("hood", False)),
-            note=base_note,
-        )
-        add_row(
-            "iecc_docs",
-            required=bool(found_food_items.get("iecc_energy_code", False)),
-            note="Required when IECC-specific details or energy compliance are called out.",
+    story: List[Any] = []
+
+    logo_path = Path(__file__).parent / logo_name
+    if logo_path.exists():
+        img = RLImage(str(logo_path))
+        img.drawHeight = 50
+        img.drawWidth = 150
+        story.append(img)
+        story.append(Spacer(1, 8 * mm))
+
+    title = "City of Buckeye – Commercial Plan Intake (Build 1.0)"
+    story.append(Paragraph(title, stylesheet["Title"]))
+    story.append(Spacer(1, 3 * mm))
+
+    subtitle = f"Intake review generated from plan set: {original_filename}"
+    story.append(Paragraph(subtitle, normal_style))
+    story.append(Spacer(1, 8 * mm))
+
+    if table_data_raw:
+        header_row = [
+            "Item",
+            "Required?",
+            "Provided?",
+            "Comments / Required Action",
+        ]
+
+        cell_style = ParagraphStyle(
+            "TableCell",
+            parent=normal_style,
+            fontSize=8,
+            leading=10,
         )
 
-    missing_required = [r["document"] for r in rows if r["required"] and not r["provided"]]
+        def make_cell(content: str) -> Paragraph:
+            content = (content or "").replace("\n", " ")
+            return Paragraph(content, cell_style)
 
-    if missing_required:
-        intake_status = "NOT READY FOR INTAKE – Missing required documents."
+        full_table_data: List[List[Any]] = []
+        full_table_data.append([make_cell(c) for c in header_row])
+
+        for row in table_data_raw:
+            if len(row) < 4:
+                row = row + [""] * (4 - len(row))
+            elif len(row) > 4:
+                row = row[:4]
+            full_table_data.append([make_cell(c) for c in row])
+
+        total_width = pagesize[0] - doc.leftMargin - doc.rightMargin
+        col_widths = [
+            total_width * 0.22,  # Item
+            total_width * 0.12,  # Required?
+            total_width * 0.12,  # Provided?
+            total_width * 0.54,  # Comments / Required Action
+        ]
+
+        table = Table(full_table_data, colWidths=col_widths, repeatRows=1)
+        header_color = colors.HexColor("#c45c26")
+
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), header_color),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 9),
+                    ("BOTTOMPADDING", (0, 0), (-1, 0), 5),
+                    ("TOPPADDING", (0, 0), (-1, 0), 4),
+                    ("FONTSIZE", (0, 1), (-1, -1), 8),
+                    ("TOPPADDING", (0, 1), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 1), (-1, -1), 3),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ]
+            )
+        )
+
+        for r_idx in range(1, len(full_table_data)):
+            if r_idx % 2 == 0:
+                table.setStyle(
+                    TableStyle(
+                        [("BACKGROUND", (0, r_idx), (-1, r_idx), colors.whitesmoke)]
+                    )
+                )
+
+        story.append(table)
     else:
-        intake_status = "READY FOR INTAKE – All required documents submitted."
+        # Fallback: paragraphs
+        for para in _split_paragraphs_from_lines(all_lines):
+            story.append(Paragraph(para, normal_style))
+            story.append(Spacer(1, 4 * mm))
 
-    return {
-        "rows": rows,
-        "missing_required": missing_required,
-        "intake_status": intake_status,
-        "plan_analysis": plan_analysis,
-    }
+    doc.build(story)
+
+
+# ---------------- OPENAI PIPELINE ----------------
+
+def call_buckeye_intake_single(
+    client: OpenAI,
+    full_pdf_text: str,
+    project_description: Optional[str],
+) -> str:
+    if project_description:
+        user_content = (
+            "PROJECT DESCRIPTION:\n"
+            f"{project_description}\n\n"
+            "FULL COMMERCIAL PLAN SET TEXT EXTRACT:\n"
+            f"{full_pdf_text}"
+        )
+    else:
+        user_content = (
+            "FULL COMMERCIAL PLAN SET TEXT EXTRACT:\n"
+            f"{full_pdf_text}"
+        )
+
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[
+            {"role": "system", "content": BUCKEYE_INTAKE_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        temperature=0.2,
+    )
+
+    return response.choices[0].message.content or ""
+
+
+def run_intake_review_pipeline(
+    client: OpenAI,
+    pdf_path: str,
+    project_description: Optional[str],
+) -> str:
+    pdf_text = extract_pdf_text(pdf_path)
+    if not pdf_text.strip():
+        raise ValueError("No extractable text found in PDF.")
+
+    MAX_CHARS = 80_000
+    if len(pdf_text) > MAX_CHARS:
+        pdf_text = pdf_text[:MAX_CHARS]
+        pdf_text += (
+            "\n\n[NOTE TO REVIEWER: Plan text truncated to the first "
+            f"{MAX_CHARS} characters to stay within model rate limits.]"
+        )
+
+    review_text = call_buckeye_intake_single(
+        client,
+        full_pdf_text=pdf_text,
+        project_description=project_description,
+    )
+
+    return review_text
 
 
 # ---------------- STREAMLIT UI ----------------
 
 def main(embed: bool = False):
-    """
-    Commercial Plan Intake UI.
-
-    embed = False → standalone (run this file directly).
-    embed = True  → called from master tabbed app.
-    """
     if not embed:
         st.set_page_config(
-            page_title="City of Buckeye – Commercial Plan Intake (Beta)",
+            page_title="City of Buckeye – Commercial Plan Intake (Build 1.0)",
             layout="wide",
             initial_sidebar_state="collapsed",
         )
@@ -412,8 +428,9 @@ def main(embed: bool = False):
     st.caption(f"Model: `{MODEL_NAME}`")
 
     st.write(
-        "This tool helps determine whether a COMMERCIAL plan submittal is complete for intake. "
-        "It checks required documents based on project type and whether the plans show food-service features."
+        "This tool helps determine whether a COMMERCIAL plan submittal is "
+        "complete for intake. It checks required documents based on project "
+        "type and whether the plans show food-service features."
     )
 
     st.info(
@@ -424,7 +441,6 @@ def main(embed: bool = False):
         "Step 4: Run the intake check to verify completeness."
     )
 
-    # ---- API key (no sidebar) ----
     env_api_key = os.environ.get("OPENAI_API_KEY", "")
     if not env_api_key:
         st.error(
@@ -435,169 +451,171 @@ def main(embed: bool = False):
 
     client = get_client(env_api_key)
 
-    # --- Main form ---
-
-    st.subheader("Project Information")
-
-    project_type = st.selectbox(
-        "Project Type",
-        ["Shell Building", "Ground-Up", "Tenant Improvement (TI)"],
-    )
-
-    is_food_service_checkbox = False
-    if project_type in ("Ground-Up", "Tenant Improvement (TI)"):
-        is_food_service_checkbox = st.checkbox(
-            "This project is a FOOD SERVICE use (restaurant, bar, commercial kitchen, café, etc.)",
-            value=False,
-        )
-
-    st.subheader("Plan Set")
-
-    plan_pdf = st.file_uploader(
-        "Upload full plan set PDF (architectural + MEP, etc.)",
-        type=["pdf"],
-    )
-
-    st.subheader("Supporting Documents")
-
-    st.write(
-        "Upload ALL other supporting PDF documents here (geotechnical report, "
-        "special inspections form, structural calcs, hood specs, IECC docs, etc.)."
-    )
-
-    support_pdfs = st.file_uploader(
-        "Supporting documents (PDF, multiple allowed)",
+    uploaded_files = st.file_uploader(
+        "Upload Commercial Plan Set PDF(s)",
         type=["pdf"],
         accept_multiple_files=True,
     )
 
-    st.markdown("---")
+    main_file = None
+    if uploaded_files:
+        file_names = [f.name for f in uploaded_files]
+        selected_name = st.selectbox(
+            "Select which PDF to run the intake review on:",
+            file_names,
+            index=0,
+        )
+        for f in uploaded_files:
+            if f.name == selected_name:
+                main_file = f
+                break
+
+    project_description = st.text_area(
+        "Optional project description",
+        placeholder=(
+            "Example: New 1-story retail shell building, Type IIB, unsprinklered. "
+            "Includes new restrooms and site work; no commercial kitchen."
+        ),
+    )
 
     run_button = st.button("Run Intake Check", type="primary")
 
     if run_button:
-        if not plan_pdf:
-            st.error("Please upload the full plan set PDF before running the intake check.")
+        if not uploaded_files or main_file is None:
+            st.error(
+                "Please upload at least one PDF and select a primary plan set "
+                "before running the intake review."
+            )
             st.stop()
 
-        if not support_pdfs:
-            st.warning(
-                "No supporting documents uploaded. The tool will still analyze the plans, "
-                "but most required documents will show as missing."
-            )
+        progress_bar = st.progress(0)
+        status_placeholder = st.empty()
 
-        with st.spinner("Analyzing plans and supporting documents for intake completeness..."):
-            # --- Extract text from main plan PDF ---
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                tmp.write(plan_pdf.read())
-                plan_tmp_path = tmp.name
-
-            try:
-                plan_text = extract_pdf_text(plan_tmp_path)
-            except Exception as e:
-                st.error(f"Error extracting text from plan PDF: {e}")
-                try:
-                    os.remove(plan_tmp_path)
-                except OSError:
-                    pass
-                return
-            finally:
-                try:
-                    os.remove(plan_tmp_path)
-                except OSError:
-                    pass
-
-            # --- Analyze plans for food-service features ---
-            try:
-                plan_analysis = analyze_plans_for_food_service(
-                    client, plan_text, project_type
-                )
-            except Exception as e:
-                st.error(f"Error analyzing plans with AI: {e}")
-                return
-
-            # --- Analyze supporting docs and aggregate detected document types ---
-            ai_detected_docs: Dict[str, bool] = {}
-            doc_sources: Dict[str, List[str]] = {}
-
-            if support_pdfs:
-                for upload in support_pdfs:
-                    filename = upload.name
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                        tmp.write(upload.read())
-                        tmp_path = tmp.name
-
-                    try:
-                        doc_text = extract_pdf_text(tmp_path)
-                    except Exception:
-                        doc_text = ""
-                    finally:
-                        try:
-                            os.remove(tmp_path)
-                        except OSError:
-                            pass
-
-                    if not doc_text.strip():
-                        continue
-
-                    try:
-                        classification = classify_support_doc(client, doc_text, filename)
-                    except Exception:
-                        continue
-
-                    doc_types = classification.get("doc_types", {}) or {}
-                    for code, is_true in doc_types.items():
-                        if is_true:
-                            ai_detected_docs[code] = True
-                            doc_sources.setdefault(code, []).append(filename)
-
-            # Assume main plan includes these:
-            ai_detected_docs.setdefault("completed_application", True)
-            ai_detected_docs.setdefault("arch_set", True)
-            ai_detected_docs.setdefault("mep_set", True)
-
-            checklist = build_intake_checklist(
-                project_type=project_type,
-                is_food_service_checkbox=is_food_service_checkbox,
-                plan_analysis=plan_analysis,
-                ai_detected_docs=ai_detected_docs,
-                doc_sources=doc_sources,
-            )
-
-        # --- Display results ---
-
-        st.subheader("Intake Status")
-        st.markdown(f"**{checklist['intake_status']}**")
-
-        if checklist["missing_required"]:
-            st.error(
-                "Missing required documents:\n- "
-                + "\n- ".join(checklist["missing_required"])
-            )
-        else:
-            st.success("All required documents appear to be submitted for this intake.")
-
-        st.subheader("Intake Checklist")
-
-        display_rows = [
-            {
-                "Document": r["document"],
-                "Required?": "Yes" if r["required"] else "No",
-                "Provided?": "Yes" if r["provided"] else "No",
-                "Status": r["status"],
-                "Notes": r["notes"],
-            }
-            for r in checklist["rows"]
-        ]
-        st.table(display_rows)
-
-        st.subheader("Plan Analysis (Food-Service Signals from Plan Set)")
-        st.json(checklist["plan_analysis"])
-
-        st.caption(
-            "This tool performs an intake completeness check only. "
-            "It does not constitute a full code compliance review."
+        progress_bar.progress(5)
+        status_placeholder.text(
+            f"Uploading and preparing file: {main_file.name} ..."
         )
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(main_file.read())
+            tmp_path = tmp.name
+
+        try:
+            progress_bar.progress(25)
+            status_placeholder.text(
+                "Step 1/2 – Extracting PDF text and sending for intake review ..."
+            )
+
+            review_text = run_intake_review_pipeline(
+                client,
+                tmp_path,
+                project_description.strip() or None,
+            )
+
+            progress_bar.progress(80)
+            status_placeholder.text(
+                "Step 2/2 – Formatting intake table into PDF ..."
+            )
+
+            with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix="_buckeye_intake_review.pdf",
+            ) as out_tmp:
+                out_pdf_path = Path(out_tmp.name)
+
+            save_text_as_pdf(
+                review_text,
+                out_pdf_path,
+                original_filename=main_file.name,
+            )
+
+            with open(out_pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+
+            try:
+                os.remove(out_pdf_path)
+            except OSError:
+                pass
+
+            progress_bar.progress(100)
+            status_placeholder.text("Intake review complete.")
+
+        except Exception as e:
+            st.error(f"Error during intake review: {e}")
+            progress_bar.empty()
+            status_placeholder.empty()
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            return
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+        st.success("Intake review complete.")
+
+        with st.expander("Show full AI intake report text"):
+            st.text_area(
+                "Intake report output",
+                value=review_text,
+                height=400,
+            )
+
+        base_name = Path(main_file.name).stem
+        download_name = f"{base_name}_buckeye_intake_review.pdf"
+
+        st.download_button(
+            label="Download Intake Review PDF",
+            data=pdf_bytes,
+            file_name=download_name,
+            mime="application/pdf",
+        )
+
+        # Feedback block
+        st.subheader("Reviewer Feedback (internal only)")
+        st.write(
+            "Use this section to rate the accuracy of this intake review and "
+            "note any corrections. This does not change the model directly, "
+            "but the data can be used to improve prompts and workflows."
+        )
+
+        rating = st.radio(
+            "How accurate was this intake review?",
+            ["Looks good", "Mostly okay", "Needs corrections"],
+            index=0,
+        )
+
+        comments = st.text_area(
+            "Notes / corrections",
+            placeholder=(
+                "Example: Energy compliance row should be 'Provided? – Yes' "
+                "because COMcheck is on A0.1; missing row for grease interceptor."
+            ),
+        )
+
+        if st.button("Save Intake Feedback"):
+            run_id = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+            csv_path = Path("feedback_intake.csv")
+
+            extra_meta: Dict[str, Any] = {"model": MODEL_NAME}
+
+            save_feedback_csv(
+                csv_path=csv_path,
+                tool_name="INTAKE",
+                run_id=run_id,
+                filename=main_file.name,
+                rating=rating,
+                comments=comments.strip(),
+                extra=extra_meta,
+            )
+
+            st.success(
+                f"Feedback saved to {csv_path.name}. "
+                "You can open this file in Excel for review."
+            )
 
 
 if __name__ == "__main__":
