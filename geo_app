@@ -1,3 +1,20 @@
+import os
+import tempfile
+from pathlib import Path
+from typing import Dict, Any, Optional
+
+import streamlit as st
+from openai import OpenAI
+from pypdf import PdfReader
+
+
+# ---------------- CONFIG ----------------
+
+MODEL_NAME = "gpt-5.1"  # OpenAI model for geotechnical review
+
+
+# ---------------- PROMPT ----------------
+
 BUCKEYE_GEOTECH_PROMPT = """
 You are a City of Buckeye Building Safety Plans Examiner performing a
 GEOTECHNICAL REVIEW for a building project in Arizona.
@@ -80,7 +97,7 @@ Your tasks:
      databases. You must NOT claim that you have actually verified the license.
      Instead, instruct the plan reviewer to confirm the license status using
      the AZBTR online register at the Arizona Board of Technical Registration
-     website.
+     website (https://azbtr.portalus.thentiacloud.net/webs/portal/register/#/).
 
    Example language:
    “The report lists John Doe, P.E. #12345 as the geotechnical engineer of
@@ -116,3 +133,228 @@ Formatting requirements:
 • Do NOT fabricate any values that are not in the report. If a value is not
   given, explicitly state “Not provided in report.”
 """
+
+
+# ---------------- HELPERS ----------------
+
+def get_client(api_key: str) -> OpenAI:
+    return OpenAI(api_key=api_key)
+
+
+def extract_pdf_text(pdf_path: str) -> str:
+    """
+    Extract text from all pages of a PDF.
+    """
+    reader = PdfReader(pdf_path)
+    all_text = []
+    for page in reader.pages:
+        page_text = page.extract_text() or ""
+        all_text.append(page_text)
+    return "\n\n".join(all_text)
+
+
+def run_geotech_review(
+    client: OpenAI,
+    full_pdf_text: str,
+    project_description: Optional[str],
+) -> Dict[str, Any]:
+    """
+    Call the OpenAI model with the geotech prompt and return the review text
+    plus any usage information we can get.
+    """
+    # Truncate very large texts to avoid rate-limit issues
+    MAX_CHARS = 80_000
+    truncated_text = full_pdf_text
+    if len(truncated_text) > MAX_CHARS:
+        truncated_text = truncated_text[:MAX_CHARS]
+        truncated_text += (
+            "\n\n[NOTE TO REVIEWER: Geotechnical report text truncated to the first "
+            f"{MAX_CHARS} characters to stay within model rate limits.]"
+        )
+
+    if project_description:
+        user_content = (
+            "PROJECT DESCRIPTION (from reviewer):\n"
+            f"{project_description}\n\n"
+            "GEOTECHNICAL REPORT TEXT EXTRACT:\n"
+            f"{truncated_text}"
+        )
+    else:
+        user_content = (
+            "GEOTECHNICAL REPORT TEXT EXTRACT:\n"
+            f"{truncated_text}"
+        )
+
+    response = client.responses.create(
+        model=MODEL_NAME,
+        instructions=BUCKEYE_GEOTECH_PROMPT,
+        input=user_content,
+    )
+
+    review_text = response.output_text
+
+    usage_summary: Dict[str, Any] = {}
+    # responses API may expose usage; be defensive
+    try:
+        u = response.usage  # type: ignore[attr-defined]
+        usage_summary = {
+            "input_tokens": getattr(u, "input_tokens", None),
+            "output_tokens": getattr(u, "output_tokens", None),
+            "total_tokens": getattr(u, "total_tokens", None),
+        }
+    except Exception:
+        usage_summary = {}
+
+    return {
+        "review_text": review_text,
+        "usage": usage_summary,
+    }
+
+
+# ---------------- STREAMLIT UI ----------------
+
+def main(embed: bool = False):
+    """
+    Geotechnical Review UI.
+
+    embed = False → standalone (run this file directly).
+    embed = True  → called from master tabbed app (no page_config).
+    """
+    if not embed:
+        st.set_page_config(
+            page_title="City of Buckeye – Geotechnical Review",
+            layout="wide",
+            initial_sidebar_state="collapsed",
+        )
+
+    st.title("City of Buckeye – Geotechnical Review")
+    st.caption(f"Model: `{MODEL_NAME}`")
+
+    st.write(
+        "Upload a geotechnical report PDF to generate a structured summary of "
+        "soil profile, allowable bearing pressures, k-values, seismic site "
+        "class, and other key design parameters. The tool also extracts "
+        "registered professional information and reminds the reviewer to verify "
+        "licenses in the Arizona Board of Technical Registration (AZBTR) online registry."
+    )
+
+    st.info(
+        "Workflow:\n"
+        "1. Upload the geotechnical report PDF.\n"
+        "2. Optionally enter a brief project description.\n"
+        "3. Run the geotechnical review to generate a structured summary and "
+        "geotech-focused discrepancy list."
+    )
+
+    # API key from environment only
+    env_api_key = os.environ.get("OPENAI_API_KEY", "")
+    if not env_api_key:
+        st.error(
+            "OPENAI_API_KEY is not set in the environment. "
+            "Please export it before running the app."
+        )
+        st.stop()
+
+    client = get_client(env_api_key)
+
+    uploaded_file = st.file_uploader(
+        "Upload Geotechnical Report (PDF)",
+        type=["pdf"],
+        accept_multiple_files=False,
+    )
+
+    project_description = st.text_area(
+        "Optional project description",
+        placeholder=(
+            "Example: 2-story Type IIB medical office building; shallow spread "
+            "footings and slab-on-grade assumed; no below-grade parking."
+        ),
+    )
+
+    run_button = st.button("Run Geotechnical Review", type="primary")
+
+    if run_button:
+        if not uploaded_file:
+            st.error("Please upload a geotechnical report PDF before running the review.")
+            st.stop()
+
+        progress_bar = st.progress(0)
+        status_placeholder = st.empty()
+
+        progress_bar.progress(5)
+        status_placeholder.text("Uploading and preparing geotechnical report...")
+
+        # Save uploaded PDF to a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(uploaded_file.read())
+            tmp_path = tmp.name
+
+        try:
+            progress_bar.progress(25)
+            status_placeholder.text("Extracting text from PDF...")
+
+            pdf_text = extract_pdf_text(tmp_path)
+            if not pdf_text.strip():
+                st.error("No extractable text found in the geotechnical report PDF.")
+                return
+
+            progress_bar.progress(50)
+            status_placeholder.text("Calling OpenAI model for geotechnical review...")
+
+            result = run_geotech_review(
+                client=client,
+                full_pdf_text=pdf_text,
+                project_description=project_description.strip() or None,
+            )
+
+            progress_bar.progress(100)
+            status_placeholder.text("Geotechnical review complete.")
+        except Exception as e:
+            st.error(f"Error during geotechnical review: {e}")
+            return
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+        st.success("Geotechnical review complete.")
+
+        review_text = result.get("review_text", "").strip()
+        usage_summary = result.get("usage", {}) or {}
+
+        # Show full AI review
+        st.subheader("Geotechnical Review Summary")
+        st.text_area(
+            "Review output",
+            value=review_text,
+            height=500,
+        )
+
+        # Download as text file
+        if review_text:
+            base_name = Path(uploaded_file.name).stem
+            download_name = f"{base_name}_buckeye_geotech_review.txt"
+            st.download_button(
+                label="Download Geotechnical Review (.txt)",
+                data=review_text.encode("utf-8"),
+                file_name=download_name,
+                mime="text/plain",
+            )
+
+        # Show token usage if available
+        if usage_summary:
+            st.subheader("Token usage (if reported by API)")
+            st.json(usage_summary)
+
+        st.caption(
+            "This tool summarizes the geotechnical report for plan review support. "
+            "It does not replace the professional judgment of a registered engineer. "
+            "License status of the geotechnical engineer of record must be verified "
+            "directly in the Arizona Board of Technical Registration online register "
+            "(https://azbtr.portalus.thentiacloud.net/webs/portal/register/#/)."
+        )
+
+
+if __name__ == "__main__":
+    main()
