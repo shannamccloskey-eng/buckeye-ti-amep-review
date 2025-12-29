@@ -1,9 +1,9 @@
 import os
+import csv
+import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 import tempfile
-import csv
-import datetime
 
 import streamlit as st
 from openai import OpenAI
@@ -25,15 +25,65 @@ from reportlab.lib import colors
 
 # ---------------- CONFIG ----------------
 
-MODEL_NAME = "gpt-4.1"  # or your preferred model
+MODEL_NAME = "gpt-4.1"
 
-GPT51_INPUT_PRICE_PER_M = 15.00  # USD per 1M input tokens
-GPT51_OUTPUT_PRICE_PER_M = 60.00  # USD per 1M output tokens
+# Approximate GPT-4.1 pricing (adjust if you want exact numbers)
+MODEL_INPUT_PRICE_PER_M = 5.00   # USD per 1M input tokens (example)
+MODEL_OUTPUT_PRICE_PER_M = 15.00  # USD per 1M output tokens (example)
 
 
 def get_client(api_key: str) -> OpenAI:
     return OpenAI(api_key=api_key)
 
+
+# ---------------- FEEDBACK HELPER ----------------
+
+def save_feedback_csv(
+    csv_path: Path,
+    tool_name: str,
+    run_id: str,
+    filename: str,
+    rating: str,
+    comments: str,
+    extra: Optional[Dict[str, Any]] = None,
+) -> None:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    is_new = not csv_path.exists()
+
+    fieldnames = [
+        "timestamp_utc",
+        "tool_name",
+        "run_id",
+        "filename",
+        "rating",
+        "comments",
+    ]
+
+    extra = extra or {}
+    for k in extra.keys():
+        if k not in fieldnames:
+            fieldnames.append(k)
+
+    timestamp = datetime.datetime.utcnow().isoformat()
+
+    row: Dict[str, Any] = {
+        "timestamp_utc": timestamp,
+        "tool_name": tool_name,
+        "run_id": run_id,
+        "filename": filename,
+        "rating": rating,
+        "comments": comments,
+    }
+    row.update(extra)
+
+    with csv_path.open("a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if is_new:
+            writer.writeheader()
+        writer.writerow(row)
+
+
+# ---------------- PROMPT ----------------
 
 BUCKEYE_TI_AMEP_PROMPT = """
 You are a City of Buckeye Building Safety Plans Examiner performing an
@@ -84,62 +134,7 @@ and closing statement.
 """
 
 
-# ---------------- PDF / TEXT HELPERS ----------------
-def save_feedback_csv(
-    csv_path: Path,
-    tool_name: str,
-    run_id: str,
-    filename: str,
-    rating: str,
-    comments: str,
-    extra: Optional[Dict[str, Any]] = None,
-) -> None:
-    """
-    Append a single feedback record to a CSV file.
-
-    - csv_path: Path to CSV file (e.g., feedback_ti_amep.csv)
-    - tool_name: Short name of the tool ("TI_AMEP", "GEO_SUMMARY", etc.)
-    - run_id: Unique id per run (e.g., ISO timestamp or uuid)
-    - filename: Source PDF file name
-    - rating: e.g., 'Looks good', 'Mostly okay', 'Needs corrections'
-    - comments: Free-form reviewer comments
-    - extra: Optional dict for extra metadata (tokens, model, etc.)
-    """
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    is_new = not csv_path.exists()
-
-    fieldnames = [
-        "timestamp_utc",
-        "tool_name",
-        "run_id",
-        "filename",
-        "rating",
-        "comments",
-    ]
-
-    extra = extra or {}
-    for k in extra.keys():
-        if k not in fieldnames:
-            fieldnames.append(k)
-
-    timestamp = datetime.datetime.utcnow().isoformat()
-
-    row: Dict[str, Any] = {
-        "timestamp_utc": timestamp,
-        "tool_name": tool_name,
-        "run_id": run_id,
-        "filename": filename,
-        "rating": rating,
-        "comments": comments,
-    }
-    row.update(extra)
-
-    with csv_path.open("a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        if is_new:
-            writer.writeheader()
-        writer.writerow(row)
-
+# ---------------- PDF / TABLE HELPERS ----------------
 
 def extract_pdf_text(pdf_path: str) -> str:
     reader = PdfReader(pdf_path)
@@ -170,10 +165,6 @@ def _extract_markdown_table(
     all_lines: List[str],
     header_prefix: str = "| Sheet Reference",
 ) -> Tuple[List[str], List[str], List[str]]:
-    """
-    Locate the Markdown discrepancy table inside the AI output and
-    return (pre_lines, table_lines, post_lines).
-    """
     header_index: Optional[int] = None
     for i, line in enumerate(all_lines):
         if line.strip().startswith(header_prefix):
@@ -201,9 +192,6 @@ def _extract_markdown_table(
 
 
 def _markdown_table_to_data(table_lines: List[str]) -> List[List[str]]:
-    """
-    Convert the GitHub-flavored discrepancy table into a 2D list of strings.
-    """
     if not table_lines:
         return []
 
@@ -211,7 +199,6 @@ def _markdown_table_to_data(table_lines: List[str]) -> List[List[str]]:
     if len(lines) < 2:
         return []
 
-    # Skip header & separator; data starts after that
     data_lines = lines[2:]
 
     table_data: List[List[str]] = []
@@ -264,7 +251,7 @@ def save_text_as_pdf(
 
     story: List[Any] = []
 
-    # ---- Header: logo + title + subtitle ----
+    # Header: logo + title + subtitle
     logo_path = Path(__file__).parent / logo_name
     if logo_path.exists():
         img = RLImage(str(logo_path))
@@ -281,7 +268,6 @@ def save_text_as_pdf(
     story.append(Paragraph(subtitle, normal_style))
     story.append(Spacer(1, 8 * mm))
 
-    # ---- Discrepancy table (preferred) ----
     if table_data_raw:
         header_row = [
             "Sheet Reference",
@@ -291,7 +277,6 @@ def save_text_as_pdf(
             "Required Correction",
         ]
 
-        # Smaller font + wrapping paragraph style
         cell_style = ParagraphStyle(
             "TableCell",
             parent=normal_style,
@@ -313,7 +298,6 @@ def save_text_as_pdf(
                 row = row[:5]
             full_table_data.append([make_cell(c) for c in row])
 
-        # Column widths proportional to page width
         total_width = pagesize[0] - doc.leftMargin - doc.rightMargin
         col_widths = [
             total_width * 0.11,  # Sheet Ref
@@ -347,7 +331,6 @@ def save_text_as_pdf(
             )
         )
 
-        # Light row striping for readability
         for r_idx in range(1, len(full_table_data)):
             if r_idx % 2 == 0:
                 table.setStyle(
@@ -361,7 +344,7 @@ def save_text_as_pdf(
         story.append(table)
 
     else:
-        # Fallback: just dump paragraphs (still with header + logo)
+        # Fallback: just dump paragraphs
         for para in _split_paragraphs_from_lines(all_lines):
             story.append(Paragraph(para, normal_style))
             story.append(Spacer(1, 4 * mm))
@@ -376,8 +359,6 @@ def call_buckeye_ti_amep_single(
     full_pdf_text: str,
     project_description: Optional[str],
 ) -> (str, Dict[str, Any]):
-    system_message = BUCKEYE_TI_AMEP_PROMPT
-
     if project_description:
         user_content = (
             "PROJECT DESCRIPTION:\n"
@@ -394,7 +375,7 @@ def call_buckeye_ti_amep_single(
     response = client.chat.completions.create(
         model=MODEL_NAME,
         messages=[
-            {"role": "system", "content": system_message},
+            {"role": "system", "content": BUCKEYE_TI_AMEP_PROMPT},
             {"role": "user", "content": user_content},
         ],
         temperature=0.2,
@@ -443,8 +424,8 @@ def run_review_pipeline_single(
         input_tokens + output_tokens + reasoning_tokens,
     )
 
-    cost_input = (input_tokens / 1_000_000.0) * GPT51_INPUT_PRICE_PER_M
-    cost_output = (output_tokens / 1_000_000.0) * GPT51_OUTPUT_PRICE_PER_M
+    cost_input = (input_tokens / 1_000_000.0) * MODEL_INPUT_PRICE_PER_M
+    cost_output = (output_tokens / 1_000_000.0) * MODEL_OUTPUT_PRICE_PER_M
     cost_total = cost_input + cost_output
 
     usage_summary: Dict[str, Any] = {
@@ -463,10 +444,6 @@ def run_review_pipeline_single(
 # ---------------- STREAMLIT UI ----------------
 
 def main(embed: bool = False):
-    """
-    TI AMEP Review UI.
-    embed = False → standalone; embed = True → called from master app.
-    """
     if not embed:
         st.set_page_config(
             page_title="City of Buckeye – TI AMEP Review (Beta)",
@@ -482,7 +459,6 @@ def main(embed: bool = False):
         "Accessibility, Energy)."
     )
 
-    # API key from environment only
     env_api_key = os.environ.get("OPENAI_API_KEY", "")
     if not env_api_key:
         st.error(
@@ -622,11 +598,55 @@ def main(embed: bool = False):
 
             if "cost_total_usd" in usage_summary:
                 st.markdown(
-                    f"**Estimated API cost (GPT-5.1): "
+                    f"**Estimated API cost (GPT-4.1): "
                     f"${usage_summary['cost_total_usd']:.4f} USD** "
                     f"(input: ${usage_summary['cost_input_usd']:.4f}, "
                     f"output: ${usage_summary['cost_output_usd']:.4f})"
                 )
+
+        # Feedback block
+        st.subheader("Reviewer Feedback (internal only)")
+        st.write(
+            "Use this section to rate the accuracy of this TI AMEP review and "
+            "note any corrections. This does not change the model directly, "
+            "but the data can be used to improve prompts and workflows."
+        )
+
+        rating = st.radio(
+            "How accurate was this review?",
+            ["Looks good", "Mostly okay", "Needs corrections"],
+            index=0,
+        )
+
+        comments = st.text_area(
+            "Notes / corrections",
+            placeholder=(
+                "Example: Missed one egress door hardware discrepancy; "
+                "code section reference should be IBC 2024 §1010.1.9."
+            ),
+        )
+
+        if st.button("Save TI AMEP Feedback"):
+            run_id = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+            csv_path = Path("feedback_ti_amep.csv")
+
+            extra_meta = {"model": MODEL_NAME}
+            extra_meta.update(usage_summary or {})
+
+            save_feedback_csv(
+                csv_path=csv_path,
+                tool_name="TI_AMEP",
+                run_id=run_id,
+                filename=main_file.name,
+                rating=rating,
+                comments=comments.strip(),
+                extra=extra_meta,
+            )
+
+            st.success(
+                f"Feedback saved to {csv_path.name}. "
+                "You can open this file in Excel for review."
+            )
 
 
 if __name__ == "__main__":
