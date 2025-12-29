@@ -22,7 +22,7 @@ TOOLS: List[Dict[str, Any]] = [
         "kwargs": {"embed": True},  # ti_amep_app.main(embed=...)
     },
     {
-        "label": "Geotechnical Review",
+        "label": "Geo Summary",
         "module": "geo_app",      # geo_app.py
         "func": "main",
         "kwargs": {"embed": True},  # geo_app.main(embed=...)
