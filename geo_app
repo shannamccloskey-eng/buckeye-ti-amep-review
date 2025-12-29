@@ -1,0 +1,21 @@
+import streamlit as st
+
+
+def main(embed: bool = False):
+    """
+    Placeholder Geotechnical Review UI.
+    Later we’ll replace this with the full geotech review workflow.
+    """
+    if not embed:
+        st.set_page_config(
+            page_title="City of Buckeye – Geotechnical Review",
+            layout="wide",
+            initial_sidebar_state="collapsed",
+        )
+
+    st.title("City of Buckeye – Geotechnical Review")
+    st.info(
+        "Geotechnical review module is coming soon.\n\n"
+        "In the meantime, please continue to upload and review "
+        "geotechnical reports using standard procedures."
+    )
