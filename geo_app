@@ -194,7 +194,6 @@ def run_geotech_review(
     review_text = response.output_text
 
     usage_summary: Dict[str, Any] = {}
-    # responses API may expose usage; be defensive
     try:
         u = response.usage  # type: ignore[attr-defined]
         usage_summary = {
@@ -246,7 +245,6 @@ def main(embed: bool = False):
         "geotech-focused discrepancy list."
     )
 
-    # API key from environment only
     env_api_key = os.environ.get("OPENAI_API_KEY", "")
     if not env_api_key:
         st.error(
@@ -284,7 +282,6 @@ def main(embed: bool = False):
         progress_bar.progress(5)
         status_placeholder.text("Uploading and preparing geotechnical report...")
 
-        # Save uploaded PDF to a temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             tmp.write(uploaded_file.read())
             tmp_path = tmp.name
@@ -323,7 +320,6 @@ def main(embed: bool = False):
         review_text = result.get("review_text", "").strip()
         usage_summary = result.get("usage", {}) or {}
 
-        # Show full AI review
         st.subheader("Geotechnical Review Summary")
         st.text_area(
             "Review output",
@@ -331,7 +327,6 @@ def main(embed: bool = False):
             height=500,
         )
 
-        # Download as text file
         if review_text:
             base_name = Path(uploaded_file.name).stem
             download_name = f"{base_name}_buckeye_geotech_review.txt"
@@ -342,7 +337,6 @@ def main(embed: bool = False):
                 mime="text/plain",
             )
 
-        # Show token usage if available
         if usage_summary:
             st.subheader("Token usage (if reported by API)")
             st.json(usage_summary)
