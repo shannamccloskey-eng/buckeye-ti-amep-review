@@ -1,4 +1,5 @@
 import os
+import io
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -6,6 +7,24 @@ from typing import Dict, Any, Optional
 import streamlit as st
 from openai import OpenAI
 from pypdf import PdfReader
+
+# Try to import reportlab for PDF generation
+try:
+    from reportlab.lib.pagesizes import letter, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import (
+        SimpleDocTemplate,
+        Paragraph,
+        Spacer,
+        Table,
+        TableStyle,
+        Image as RLImage,
+    )
+
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
 
 
 # ---------------- CONFIG ----------------
@@ -148,6 +167,111 @@ def run_geotech_review(
     }
 
 
+def parse_markdown_table(md_table: str):
+    """
+    Parse a simple GitHub-flavored markdown table into a list-of-lists.
+
+    Expects something like:
+    | A | B | C |
+    |---|---|---|
+    | 1 | 2 | 3 |
+    """
+    lines = [ln.strip() for ln in md_table.splitlines() if ln.strip()]
+    rows = []
+    for i, line in enumerate(lines):
+        if not line.startswith("|"):
+            continue
+        # Skip separator row (---)
+        if i == 1 and "-" in line.replace("|", ""):
+            continue
+        parts = [cell.strip() for cell in line.strip("|").split("|")]
+        rows.append(parts)
+    return rows
+
+
+def build_geotech_pdf(
+    md_table: str,
+    original_filename: str,
+    logo_name: str = "City of Buckeye 2025.png",
+) -> bytes:
+    """
+    Build a landscape PDF containing the Buckeye logo, title, and the
+    geotechnical summary table.
+    """
+    if not REPORTLAB_AVAILABLE:
+        raise RuntimeError(
+            "reportlab is not installed. Install it with 'pip install reportlab'."
+        )
+
+    # Parse table
+    data = parse_markdown_table(md_table)
+    if not data:
+        data = [["Parameter", "Major Structures", "Minor Structures"],
+                ["No data", "No data", "No data"]]
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(letter),
+        leftMargin=36,
+        rightMargin=36,
+        topMargin=36,
+        bottomMargin=36,
+    )
+
+    styles = getSampleStyleSheet()
+    story = []
+
+    # Logo + title
+    logo_path = Path(__file__).parent / logo_name
+    if logo_path.exists():
+        img = RLImage(str(logo_path))
+        img.drawHeight = 50  # maintain aspect ratio
+        img.drawWidth = 150
+        story.append(img)
+        story.append(Spacer(1, 12))
+
+    title = "City of Buckeye – Geotechnical Summary"
+    story.append(Paragraph(title, styles["Title"]))
+    story.append(Spacer(1, 6))
+
+    subtitle = f"Summary derived from geotechnical report: {original_filename}"
+    story.append(Paragraph(subtitle, styles["Normal"]))
+    story.append(Spacer(1, 18))
+
+    # Build table
+    table = Table(data, repeatRows=1)
+    orange = colors.HexColor("#c45c26")
+
+    table_style = TableStyle(
+        [
+            ("BACKGROUND", (0, 0), (-1, 0), orange),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 11),
+            ("FONTSIZE", (0, 1), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+            ("TOPPADDING", (0, 0), (-1, 0), 6),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ]
+    )
+
+    # Light row striping
+    for row_idx in range(1, len(data)):
+        if row_idx % 2 == 0:
+            table_style.add("BACKGROUND", (0, row_idx), (-1, row_idx),
+                            colors.whitesmoke)
+
+    table.setStyle(table_style)
+    story.append(table)
+
+    doc.build(story)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    return pdf_bytes
+
+
 # ---------------- STREAMLIT UI ----------------
 
 def main(embed: bool = False):
@@ -267,16 +391,39 @@ def main(embed: bool = False):
                 height=300,
             )
 
+        base_name = Path(uploaded_file.name).stem if uploaded_file else "geotech_report"
+
         # Download the table as a text file (Markdown)
         if review_text:
-            base_name = Path(uploaded_file.name).stem
-            download_name = f"{base_name}_buckeye_geotech_summary_table.txt"
+            download_name_txt = f"{base_name}_buckeye_geotech_summary_table.txt"
             st.download_button(
                 label="Download Summary Table (.txt)",
                 data=review_text.encode("utf-8"),
-                file_name=download_name,
+                file_name=download_name_txt,
                 mime="text/plain",
             )
+
+            # Build and offer PDF if reportlab is available
+            if REPORTLAB_AVAILABLE:
+                try:
+                    pdf_bytes = build_geotech_pdf(
+                        review_text,
+                        original_filename=uploaded_file.name,
+                    )
+                    download_name_pdf = f"{base_name}_buckeye_geotech_summary.pdf"
+                    st.download_button(
+                        label="Download Summary Report (.pdf)",
+                        data=pdf_bytes,
+                        file_name=download_name_pdf,
+                        mime="application/pdf",
+                    )
+                except Exception as e:
+                    st.error(f"Could not generate PDF summary: {e}")
+            else:
+                st.warning(
+                    "PDF generation requires the 'reportlab' package. "
+                    "Install it with `pip install reportlab` to enable PDF downloads."
+                )
 
         # Show token usage if available
         if usage_summary:
