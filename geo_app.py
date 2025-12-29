@@ -1,10 +1,10 @@
 import os
 import io
-import tempfile
-from pathlib import Path
-from typing import Dict, Any, Optional
 import csv
 import datetime
+import tempfile
+from pathlib import Path
+from typing import Dict, Any, Optional, List
 
 import streamlit as st
 from openai import OpenAI
@@ -31,7 +31,7 @@ except ImportError:
 
 # ---------------- CONFIG ----------------
 
-MODEL_NAME = "gpt-5.1"  # OpenAI model for geotechnical review
+MODEL_NAME = "gpt-5.1"  # OpenAI model for geotechnical summary
 
 
 # ---------------- PROMPT ----------------
@@ -94,7 +94,8 @@ Formatting requirements:
 """
 
 
-# ---------------- HELPERS ----------------
+# ---------------- FEEDBACK HELPER ----------------
+
 def save_feedback_csv(
     csv_path: Path,
     tool_name: str,
@@ -106,14 +107,6 @@ def save_feedback_csv(
 ) -> None:
     """
     Append a single feedback record to a CSV file.
-
-    - csv_path: Path to CSV file (e.g., feedback_ti_amep.csv)
-    - tool_name: Short name of the tool ("TI_AMEP", "GEO_SUMMARY", etc.)
-    - run_id: Unique id per run (e.g., ISO timestamp or uuid)
-    - filename: Source PDF file name
-    - rating: e.g., 'Looks good', 'Mostly okay', 'Needs corrections'
-    - comments: Free-form reviewer comments
-    - extra: Optional dict for extra metadata (tokens, model, etc.)
     """
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     is_new = not csv_path.exists()
@@ -150,14 +143,14 @@ def save_feedback_csv(
             writer.writeheader()
         writer.writerow(row)
 
+
+# ---------------- OPENAI / PDF HELPERS ----------------
+
 def get_client(api_key: str) -> OpenAI:
     return OpenAI(api_key=api_key)
 
 
 def extract_pdf_text(pdf_path: str) -> str:
-    """
-    Extract text from all pages of a PDF.
-    """
     reader = PdfReader(pdf_path)
     all_text = []
     for page in reader.pages:
@@ -171,11 +164,7 @@ def run_geotech_review(
     full_pdf_text: str,
     project_description: Optional[str],
 ) -> Dict[str, Any]:
-    """
-    Call the OpenAI model with the geotech prompt and return the review text
-    plus any usage information we can get.
-    """
-    # Truncate very large texts to avoid rate-limit issues
+    # Truncate very large texts
     MAX_CHARS = 80_000
     truncated_text = full_pdf_text
     if len(truncated_text) > MAX_CHARS:
@@ -223,27 +212,21 @@ def run_geotech_review(
     }
 
 
-def parse_markdown_table(md_table: str):
+def parse_markdown_table(md_table: str) -> List[List[str]]:
     """
-    Parse a simple GitHub-flavored markdown table into a list-of-lists.
-
-    Expects something like:
-    | A | B | C |
-    |---|---|---|
-    | 1 | 2 | 3 |
+    Parse a simple 3-column GitHub-flavored markdown table into a list-of-lists.
     """
     lines = [ln.strip() for ln in md_table.splitlines() if ln.strip()]
-    rows = []
+    rows: List[List[str]] = []
     for i, line in enumerate(lines):
         if not line.startswith("|"):
             continue
-        # Skip separator row (---) by checking for all-dash cells
+        # Skip separator row (---)
         if i == 1:
             cells = [cell.strip() for cell in line.strip("|").split("|")]
             if all(set(c) <= {"-", ":"} for c in cells):
                 continue
         parts = [cell.strip() for cell in line.strip("|").split("|")]
-        # Ensure exactly three columns
         if len(parts) < 3:
             parts += [""] * (3 - len(parts))
         elif len(parts) > 3:
@@ -260,15 +243,12 @@ def build_geotech_pdf(
     """
     Build a landscape PDF containing the Buckeye logo, title, and the
     geotechnical summary table.
-
-    Column widths are fixed and cells are wrapped to keep everything readable.
     """
     if not REPORTLAB_AVAILABLE:
         raise RuntimeError(
             "reportlab is not installed. Install it with 'pip install reportlab'."
         )
 
-    # Parse table
     raw_data = parse_markdown_table(md_table)
     if not raw_data:
         raw_data = [["Parameter", "Major Structures", "Minor Structures"],
@@ -292,7 +272,7 @@ def build_geotech_pdf(
     logo_path = Path(__file__).parent / logo_name
     if logo_path.exists():
         img = RLImage(str(logo_path))
-        img.drawHeight = 50  # maintain aspect ratio
+        img.drawHeight = 50
         img.drawWidth = 150
         story.append(img)
         story.append(Spacer(1, 12))
@@ -305,7 +285,7 @@ def build_geotech_pdf(
     story.append(Paragraph(subtitle, styles["Normal"]))
     story.append(Spacer(1, 18))
 
-    # Convert cells to Paragraphs for word wrapping
+    # Convert cells to Paragraphs for wrapping
     body_style = ParagraphStyle(
         "GeoCell",
         parent=styles["BodyText"],
@@ -313,16 +293,14 @@ def build_geotech_pdf(
         leading=11,
     )
 
-    data = []
-    for r_idx, row in enumerate(raw_data):
+    data: List[List[Any]] = []
+    for row in raw_data:
         para_row = []
         for cell in row:
-            # Replace newlines with spaces for nicer wrapping
             text = (cell or "").replace("\n", " ")
             para_row.append(Paragraph(text, body_style))
         data.append(para_row)
 
-    # Determine column widths (3 columns) to fit page width
     total_width = page_size[0] - doc.leftMargin - doc.rightMargin
     col_widths = [
         total_width * 0.28,  # Parameter
@@ -341,19 +319,21 @@ def build_geotech_pdf(
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, 0), 11),
+            ("FONTSIZE", (0, 1), (-1, -1), 9),
             ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
             ("TOPPADDING", (0, 0), (-1, 0), 6),
-            ("FONTSIZE", (0, 1), (-1, -1), 9),
             ("TOPPADDING", (0, 1), (-1, -1), 4),
             ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
         ]
     )
 
-    # Light row striping
-    for row_idx in range(1, len(data)):
-        if row_idx % 2 == 0:
-            table_style.add("BACKGROUND", (0, row_idx), (-1, row_idx),
+    # Stripe rows
+    for r_idx in range(1, len(data)):
+        if r_idx % 2 == 0:
+            table_style.add("BACKGROUND", (0, r_idx), (-1, r_idx),
                             colors.whitesmoke)
 
     table.setStyle(table_style)
@@ -368,12 +348,6 @@ def build_geotech_pdf(
 # ---------------- STREAMLIT UI ----------------
 
 def main(embed: bool = False):
-    """
-    Geotechnical Review UI.
-
-    embed = False → standalone (run this file directly).
-    embed = True  → called from master tabbed app (no page_config).
-    """
     if not embed:
         st.set_page_config(
             page_title="City of Buckeye – Geotechnical Summary",
@@ -415,9 +389,8 @@ def main(embed: bool = False):
     project_description = st.text_area(
         "Optional project description",
         placeholder=(
-            "Example: Retail shell building with slab-on-grade and shallow "
-            "spread footings; minor structures include screen walls and "
-            "site signage."
+            "Example: 1-story retail shell buildings with slab-on-grade and shallow "
+            "spread footings; minor structures include screen walls and site signage."
         ),
     )
 
@@ -472,11 +445,11 @@ def main(embed: bool = False):
         review_text = result.get("review_text", "").strip()
         usage_summary = result.get("usage", {}) or {}
 
-        # Display the 3-column table as rendered Markdown
+        # On-screen table
         st.subheader("Geotechnical Summary Table")
         st.markdown(review_text)
 
-        # Optional: show raw text for copy/paste
+        # Raw text expander
         with st.expander("Show raw table text"):
             st.text_area(
                 "Raw Markdown table",
@@ -486,7 +459,7 @@ def main(embed: bool = False):
 
         base_name = Path(uploaded_file.name).stem if uploaded_file else "geotech_report"
 
-        # Build and offer PDF if reportlab is available
+        # PDF download
         if review_text:
             if REPORTLAB_AVAILABLE:
                 try:
@@ -509,10 +482,54 @@ def main(embed: bool = False):
                     "Install it with `pip install reportlab` to enable PDF downloads."
                 )
 
-        # Show token usage if available
+        # Token usage
         if usage_summary:
             st.subheader("Token usage (if reported by API)")
             st.json(usage_summary)
+
+        # Feedback block
+        st.subheader("Reviewer Feedback (internal only)")
+        st.write(
+            "Use this section to rate the accuracy of this geotechnical summary "
+            "and note any corrections. This does not change the model directly, "
+            "but the data can be used to improve prompts and workflows."
+        )
+
+        geo_rating = st.radio(
+            "How accurate was this summary?",
+            ["Looks good", "Mostly okay", "Needs corrections"],
+            index=0,
+        )
+
+        geo_comments = st.text_area(
+            "Notes / corrections",
+            placeholder=(
+                "Example: k-value listed in wrong row; minor structure footing depth "
+                "should be 18 in. per report."
+            ),
+        )
+
+        if st.button("Save Geotech Feedback"):
+            run_id = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+            csv_path = Path("feedback_geotech_summary.csv")
+
+            extra_meta = {"model": MODEL_NAME}
+            extra_meta.update(usage_summary or {})
+
+            save_feedback_csv(
+                csv_path=csv_path,
+                tool_name="GEO_SUMMARY",
+                run_id=run_id,
+                filename=uploaded_file.name,
+                rating=geo_rating,
+                comments=geo_comments.strip(),
+                extra=extra_meta,
+            )
+
+            st.success(
+                f"Feedback saved to {csv_path.name}. "
+                "You can open this file in Excel for review."
+            )
 
         st.caption(
             "This tool summarizes key geotechnical design parameters for plan review. "
