@@ -59,11 +59,16 @@ def _load_tool_callable(tool: Dict[str, Any]) -> Callable[[], None]:
         return _wrapped
 
     except Exception as e:
-        def _error():
-            st.error(
-                f"Error loading tool '{label}' "
-                f"({module_name}.{func_name}): {e}"
-            )
+        # IMPORTANT: capture the message into a local variable
+        # so it still exists when the inner function runs.
+        msg = (
+            f"Tool '{label}' is not available right now "
+            f"({module_name}.{func_name}): {e}"
+        )
+
+        def _error(message: str = msg):
+            st.error(message)
+
         return _error
 
 
