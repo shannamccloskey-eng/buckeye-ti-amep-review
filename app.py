@@ -27,6 +27,12 @@ TOOLS: List[Dict[str, Any]] = [
         "func": "main",
         "kwargs": {"embed": True},  # geo_app.main(embed=...)
     },
+    {
+        "label": "Feedback Dashboard",
+        "module": "feedback_dashboard_app",  # feedback_dashboard_app.py
+        "func": "main",
+        "kwargs": {"embed": True},  # feedback_dashboard_app.main(embed=...)
+    },
     # Future tools – e.g.:
     # {
     #     "label": "Architectural Review",
@@ -245,7 +251,8 @@ def main():
         st.title("City of Buckeye – Plan Review Tools")
         st.write(
             "Unified interface for Building Safety tools, including Commercial Plan Intake, "
-            "TI AMEP review, and Geotechnical review. Additional tools can be added as new tabs."
+            "TI AMEP review, Geotechnical summary, and the Feedback Dashboard. "
+            "Additional tools can be added as new tabs."
         )
 
     st.markdown("---")
