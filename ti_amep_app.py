@@ -27,7 +27,7 @@ from reportlab.lib import colors
 
 MODEL_NAME = "gpt-4.1"
 
-# Approximate GPT-4.1 pricing (adjust if you want exact numbers)
+# Approximate GPT-4.1 pricing (adjust if desired)
 MODEL_INPUT_PRICE_PER_M = 5.00   # USD per 1M input tokens (example)
 MODEL_OUTPUT_PRICE_PER_M = 15.00  # USD per 1M output tokens (example)
 
@@ -647,6 +647,11 @@ def main(embed: bool = False):
                 f"Feedback saved to {csv_path.name}. "
                 "You can open this file in Excel for review."
             )
+
+        # ICC link
+        st.markdown(
+            "[Open ICC Codes (ICCsafe.org)](https://codes.iccsafe.org/)",
+        )
 
 
 if __name__ == "__main__":
