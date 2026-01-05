@@ -444,6 +444,12 @@ def run_review_pipeline_single(
 # ---------------- STREAMLIT UI ----------------
 
 def main(embed: bool = False):
+    """
+    TI AMEP Review UI with:
+    - Persistent results via session_state
+    - Feedback saving that survives reruns
+    - ICC codes link
+    """
     if not embed:
         st.set_page_config(
             page_title="City of Buckeye – TI AMEP Review (Beta)",
@@ -459,6 +465,7 @@ def main(embed: bool = False):
         "Accessibility, Energy)."
     )
 
+    # Ensure OpenAI key
     env_api_key = os.environ.get("OPENAI_API_KEY", "")
     if not env_api_key:
         st.error(
@@ -469,6 +476,14 @@ def main(embed: bool = False):
 
     client = get_client(env_api_key)
 
+    # ---- Initialize session_state for persistence ----
+    if "ti_review" not in st.session_state:
+        st.session_state["ti_review"] = ""
+        st.session_state["ti_usage"] = {}
+        st.session_state["ti_pdf_bytes"] = None
+        st.session_state["ti_filename"] = ""
+
+    # ---- File upload + project description ----
     uploaded_files = st.file_uploader(
         "Upload TI Plan Set PDF(s)",
         type=["pdf"],
@@ -496,6 +511,7 @@ def main(embed: bool = False):
         ),
     )
 
+    # ---- Run review button ----
     run_button = st.button("Run TI AMEP Review", type="primary")
 
     if run_button:
@@ -514,6 +530,7 @@ def main(embed: bool = False):
             f"Uploading and preparing file: {main_file.name} ..."
         )
 
+        # Save uploaded file to temp
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             tmp.write(main_file.read())
             tmp_path = tmp.name
@@ -558,6 +575,12 @@ def main(embed: bool = False):
             progress_bar.progress(100)
             status_placeholder.text("Step 3/3 – TI AMEP review complete.")
 
+            # ---- Save results into session_state so they persist ----
+            st.session_state["ti_review"] = review_text
+            st.session_state["ti_usage"] = usage_summary
+            st.session_state["ti_pdf_bytes"] = pdf_bytes
+            st.session_state["ti_filename"] = main_file.name
+
         except Exception as e:
             st.error(f"Error during TI AMEP review: {e}")
             progress_bar.empty()
@@ -575,6 +598,13 @@ def main(embed: bool = False):
 
         st.success("TI AMEP review complete.")
 
+    # ---- Display results from session_state (if any) ----
+    review_text = st.session_state.get("ti_review", "")
+    usage_summary = st.session_state.get("ti_usage", {}) or {}
+    pdf_bytes = st.session_state.get("ti_pdf_bytes", None)
+    filename = st.session_state.get("ti_filename", "")
+
+    if review_text:
         with st.expander("Show full AI review text"):
             st.text_area(
                 "Review output",
@@ -582,15 +612,16 @@ def main(embed: bool = False):
                 height=400,
             )
 
-        base_name = Path(main_file.name).stem
-        download_name = f"{base_name}_buckeye_ti_amep_review.pdf"
+        if pdf_bytes:
+            base_name = Path(filename).stem if filename else "ti_amep"
+            download_name = f"{base_name}_buckeye_ti_amep_review.pdf"
 
-        st.download_button(
-            label="Download TI AMEP Review PDF",
-            data=pdf_bytes,
-            file_name=download_name,
-            mime="application/pdf",
-        )
+            st.download_button(
+                label="Download TI AMEP Review PDF",
+                data=pdf_bytes,
+                file_name=download_name,
+                mime="application/pdf",
+            )
 
         if usage_summary:
             st.subheader("Token usage & cost estimate")
@@ -604,7 +635,7 @@ def main(embed: bool = False):
                     f"output: ${usage_summary['cost_output_usd']:.4f})"
                 )
 
-        # Feedback block
+        # ---- Feedback block (uses stored results) ----
         st.subheader("Reviewer Feedback (internal only)")
         st.write(
             "Use this section to rate the accuracy of this TI AMEP review and "
@@ -616,10 +647,12 @@ def main(embed: bool = False):
             "How accurate was this review?",
             ["Looks good", "Mostly okay", "Needs corrections"],
             index=0,
+            key="ti_rating",
         )
 
         comments = st.text_area(
             "Notes / corrections",
+            key="ti_comments",
             placeholder=(
                 "Example: Missed one egress door hardware discrepancy; "
                 "code section reference should be IBC 2024 §1010.1.9."
@@ -637,21 +670,21 @@ def main(embed: bool = False):
                 csv_path=csv_path,
                 tool_name="TI_AMEP",
                 run_id=run_id,
-                filename=main_file.name,
+                filename=filename or "(unknown)",
                 rating=rating,
                 comments=comments.strip(),
                 extra=extra_meta,
             )
 
             st.success(
-                f"Feedback saved to {csv_path.name}. "
-                "You can open this file in Excel for review."
+                f"Feedback saved to {csv_path.resolve().name} "
+                f"in {csv_path.resolve().parent}."
             )
 
-        # ICC link
-        st.markdown(
-            "[Open ICC Codes (ICCsafe.org)](https://codes.iccsafe.org/)",
-        )
+    # ---- ICC link available at all times ----
+    st.markdown(
+        "[Open ICC Codes (ICCsafe.org)](https://codes.iccsafe.org/)",
+    )
 
 
 if __name__ == "__main__":
