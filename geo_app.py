@@ -105,9 +105,6 @@ def save_feedback_csv(
     comments: str,
     extra: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """
-    Append a single feedback record to a CSV file.
-    """
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     is_new = not csv_path.exists()
 
@@ -164,7 +161,6 @@ def run_geotech_review(
     full_pdf_text: str,
     project_description: Optional[str],
 ) -> Dict[str, Any]:
-    # Truncate very large texts
     MAX_CHARS = 80_000
     truncated_text = full_pdf_text
     if len(truncated_text) > MAX_CHARS:
@@ -213,15 +209,11 @@ def run_geotech_review(
 
 
 def parse_markdown_table(md_table: str) -> List[List[str]]:
-    """
-    Parse a simple 3-column GitHub-flavored markdown table into a list-of-lists.
-    """
     lines = [ln.strip() for ln in md_table.splitlines() if ln.strip()]
     rows: List[List[str]] = []
     for i, line in enumerate(lines):
         if not line.startswith("|"):
             continue
-        # Skip separator row (---)
         if i == 1:
             cells = [cell.strip() for cell in line.strip("|").split("|")]
             if all(set(c) <= {"-", ":"} for c in cells):
@@ -240,10 +232,6 @@ def build_geotech_pdf(
     original_filename: str,
     logo_name: str = "City of Buckeye 2025.png",
 ) -> bytes:
-    """
-    Build a landscape PDF containing the Buckeye logo, title, and the
-    geotechnical summary table.
-    """
     if not REPORTLAB_AVAILABLE:
         raise RuntimeError(
             "reportlab is not installed. Install it with 'pip install reportlab'."
@@ -268,7 +256,6 @@ def build_geotech_pdf(
     styles = getSampleStyleSheet()
     story = []
 
-    # Logo + title
     logo_path = Path(__file__).parent / logo_name
     if logo_path.exists():
         img = RLImage(str(logo_path))
@@ -285,7 +272,6 @@ def build_geotech_pdf(
     story.append(Paragraph(subtitle, styles["Normal"]))
     story.append(Spacer(1, 18))
 
-    # Convert cells to Paragraphs for wrapping
     body_style = ParagraphStyle(
         "GeoCell",
         parent=styles["BodyText"],
@@ -303,9 +289,9 @@ def build_geotech_pdf(
 
     total_width = page_size[0] - doc.leftMargin - doc.rightMargin
     col_widths = [
-        total_width * 0.28,  # Parameter
-        total_width * 0.36,  # Major
-        total_width * 0.36,  # Minor
+        total_width * 0.28,
+        total_width * 0.36,
+        total_width * 0.36,
     ]
 
     table = Table(data, colWidths=col_widths, repeatRows=1)
@@ -330,7 +316,6 @@ def build_geotech_pdf(
         ]
     )
 
-    # Stripe rows
     for r_idx in range(1, len(data)):
         if r_idx % 2 == 0:
             table_style.add("BACKGROUND", (0, r_idx), (-1, r_idx),
@@ -349,10 +334,8 @@ def build_geotech_pdf(
 
 def main(embed: bool = False):
     """
-    Geotechnical Review UI with:
-    - Persistent results via session_state
-    - Feedback saving that survives reruns
-    - ICC link
+    Geotechnical Review UI with session_state persistence,
+    ICC button, and Reset button.
     """
     if not embed:
         st.set_page_config(
@@ -448,7 +431,6 @@ def main(embed: bool = False):
             review_text = result.get("review_text", "").strip()
             usage_summary = result.get("usage", {}) or {}
 
-            # Save to session_state
             st.session_state["geo_review"] = review_text
             st.session_state["geo_usage"] = usage_summary
 
@@ -503,13 +485,13 @@ def main(embed: bool = False):
                 data=pdf_bytes,
                 file_name=download_name_pdf,
                 mime="application/pdf",
+                key="geo_pdf_download",
             )
 
         if usage_summary:
             st.subheader("Token usage (if reported by API)")
             st.json(usage_summary)
 
-        # Feedback
         st.subheader("Reviewer Feedback (internal only)")
         st.write(
             "Use this section to rate the accuracy of this geotechnical summary "
@@ -533,7 +515,7 @@ def main(embed: bool = False):
             ),
         )
 
-        if st.button("Save Geotech Feedback"):
+        if st.button("Save Geotech Feedback", key="geo_save_feedback"):
             run_id = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%S")
             csv_path = Path("feedback_geotech_summary.csv")
 
@@ -555,10 +537,57 @@ def main(embed: bool = False):
                 f"in {csv_path.resolve().parent}."
             )
 
-    # ICC link
-    st.markdown(
-        "[Open ICC Codes (ICCsafe.org)](https://codes.iccsafe.org/)",
-    )
+        st.markdown("---")
+
+        col_icc, col_reset = st.columns(2)
+
+        with col_icc:
+            st.markdown(
+                """
+                <a href="https://codes.iccsafe.org/" target="_blank">
+                    <button style="
+                        background-color:#c45c26;
+                        color:white;
+                        border:none;
+                        padding:0.35rem 1.1rem;
+                        border-radius:999px;
+                        font-weight:600;
+                        cursor:pointer;
+                    ">
+                        Open ICC Codes (ICCsafe.org)
+                    </button>
+                </a>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with col_reset:
+            if st.button("Start New Geotech Review / Reset Results", key="geo_reset"):
+                for k in ("geo_review", "geo_usage", "geo_pdf_bytes", "geo_filename"):
+                    if k in st.session_state:
+                        del st.session_state[k]
+                st.experimental_rerun()
+    else:
+        # Even with no results yet, show ICC button for convenience
+        st.markdown(
+            """
+            <a href="https://codes.iccsafe.org/" target="_blank">
+                <button style="
+                    background-color:#c45c26;
+                    color:white;
+                    border:none;
+                    padding:0.35rem 1.1rem;
+                    border-radius:999px;
+                    font-weight:600;
+                    cursor:pointer;
+                    margin-top:0.75rem;
+                ">
+                    Open ICC Codes (ICCsafe.org)
+                </button>
+            </a>
+            """,
+            unsafe_allow_html=True,
+        )
 
     st.caption(
         "This tool summarizes key geotechnical design parameters for plan review. "
