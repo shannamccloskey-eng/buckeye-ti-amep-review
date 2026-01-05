@@ -214,7 +214,7 @@ def _markdown_table_to_data(table_lines: List[str]) -> List[List[str]]:
     if len(lines) < 2:
         return []
 
-    data_lines = lines[2:]  # skip header + separator
+    data_lines = lines[2:]
 
     table_data: List[List[str]] = []
     for line in data_lines:
@@ -238,10 +238,6 @@ def save_text_as_pdf(
     original_filename: str,
     logo_name: str = "City of Buckeye 2025.png",
 ) -> None:
-    """
-    Buckeye-branded intake PDF with logo, title, subtitle, and
-    wrapped intake completeness table.
-    """
     stylesheet = getSampleStyleSheet()
     normal_style = stylesheet["Normal"]
 
@@ -308,10 +304,10 @@ def save_text_as_pdf(
 
         total_width = pagesize[0] - doc.leftMargin - doc.rightMargin
         col_widths = [
-            total_width * 0.22,  # Item
-            total_width * 0.12,  # Required?
-            total_width * 0.12,  # Provided?
-            total_width * 0.54,  # Comments / Required Action
+            total_width * 0.22,
+            total_width * 0.12,
+            total_width * 0.12,
+            total_width * 0.54,
         ]
 
         table = Table(full_table_data, colWidths=col_widths, repeatRows=1)
@@ -348,7 +344,6 @@ def save_text_as_pdf(
 
         story.append(table)
     else:
-        # Fallback: paragraphs
         for para in _split_paragraphs_from_lines(all_lines):
             story.append(Paragraph(para, normal_style))
             story.append(Spacer(1, 4 * mm))
@@ -418,10 +413,8 @@ def run_intake_review_pipeline(
 
 def main(embed: bool = False):
     """
-    Commercial Plan Intake UI with:
-    - Persistent results via session_state
-    - Feedback saving that survives reruns
-    - ICC link
+    Commercial Plan Intake UI with session_state persistence,
+    ICC button, and Reset button.
     """
     if not embed:
         st.set_page_config(
@@ -455,7 +448,6 @@ def main(embed: bool = False):
 
     client = get_client(env_api_key)
 
-    # Session state init
     if "intake_review" not in st.session_state:
         st.session_state["intake_review"] = ""
         st.session_state["intake_pdf_bytes"] = None
@@ -467,7 +459,7 @@ def main(embed: bool = False):
         accept_multiple_files=True,
     )
 
-    main_file = None    # Primary plan set selected
+    main_file = None
     if uploaded_files:
         file_names = [f.name for f in uploaded_files]
         selected_name = st.selectbox(
@@ -550,7 +542,6 @@ def main(embed: bool = False):
             progress_bar.progress(100)
             status_placeholder.text("Intake review complete.")
 
-            # Save to session_state
             st.session_state["intake_review"] = review_text
             st.session_state["intake_pdf_bytes"] = pdf_bytes
             st.session_state["intake_filename"] = main_file.name
@@ -572,7 +563,6 @@ def main(embed: bool = False):
 
         st.success("Intake review complete.")
 
-    # Display stored results
     review_text = st.session_state.get("intake_review", "")
     pdf_bytes = st.session_state.get("intake_pdf_bytes", None)
     filename = st.session_state.get("intake_filename", "")
@@ -594,9 +584,9 @@ def main(embed: bool = False):
                 data=pdf_bytes,
                 file_name=download_name,
                 mime="application/pdf",
+                key="intake_pdf_download",
             )
 
-        # Feedback
         st.subheader("Reviewer Feedback (internal only)")
         st.write(
             "Use this section to rate the accuracy of this intake review and "
@@ -620,7 +610,7 @@ def main(embed: bool = False):
             ),
         )
 
-        if st.button("Save Intake Feedback"):
+        if st.button("Save Intake Feedback", key="intake_save_feedback"):
             run_id = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%S")
             csv_path = Path("feedback_intake.csv")
 
@@ -641,10 +631,56 @@ def main(embed: bool = False):
                 f"in {csv_path.resolve().parent}."
             )
 
-    # ICC link
-    st.markdown(
-        "[Open ICC Codes (ICCsafe.org)](https://codes.iccsafe.org/)",
-    )
+        st.markdown("---")
+
+        col_icc, col_reset = st.columns(2)
+
+        with col_icc:
+            st.markdown(
+                """
+                <a href="https://codes.iccsafe.org/" target="_blank">
+                    <button style="
+                        background-color:#c45c26;
+                        color:white;
+                        border:none;
+                        padding:0.35rem 1.1rem;
+                        border-radius:999px;
+                        font-weight:600;
+                        cursor:pointer;
+                    ">
+                        Open ICC Codes (ICCsafe.org)
+                    </button>
+                </a>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with col_reset:
+            if st.button("Start New Intake Review / Reset Results", key="intake_reset"):
+                for k in ("intake_review", "intake_pdf_bytes", "intake_filename"):
+                    if k in st.session_state:
+                        del st.session_state[k]
+                st.experimental_rerun()
+    else:
+        st.markdown(
+            """
+            <a href="https://codes.iccsafe.org/" target="_blank">
+                <button style="
+                    background-color:#c45c26;
+                    color:white;
+                    border:none;
+                    padding:0.35rem 1.1rem;
+                    border-radius:999px;
+                    font-weight:600;
+                    cursor:pointer;
+                    margin-top:0.75rem;
+                ">
+                    Open ICC Codes (ICCsafe.org)
+                </button>
+            </a>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 if __name__ == "__main__":
