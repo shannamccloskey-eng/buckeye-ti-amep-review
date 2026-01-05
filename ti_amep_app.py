@@ -27,9 +27,8 @@ from reportlab.lib import colors
 
 MODEL_NAME = "gpt-4.1"
 
-# Approximate GPT-4.1 pricing (adjust if desired)
-MODEL_INPUT_PRICE_PER_M = 5.00   # USD per 1M input tokens (example)
-MODEL_OUTPUT_PRICE_PER_M = 15.00  # USD per 1M output tokens (example)
+MODEL_INPUT_PRICE_PER_M = 5.00
+MODEL_OUTPUT_PRICE_PER_M = 15.00
 
 
 def get_client(api_key: str) -> OpenAI:
@@ -223,15 +222,6 @@ def save_text_as_pdf(
     original_filename: str,
     logo_name: str = "City of Buckeye 2025.png",
 ) -> None:
-    """
-    Create a Buckeye-branded landscape PDF with:
-    - Logo (if present)
-    - Title: City of Buckeye – TI AMEP Review
-    - Subtitle with original TI plan-set filename
-    - Discrepancy table as a wrapped landscape table
-
-    If no table is detected, falls back to paragraphs.
-    """
     stylesheet = getSampleStyleSheet()
     normal_style = stylesheet["Normal"]
 
@@ -251,7 +241,6 @@ def save_text_as_pdf(
 
     story: List[Any] = []
 
-    # Header: logo + title + subtitle
     logo_path = Path(__file__).parent / logo_name
     if logo_path.exists():
         img = RLImage(str(logo_path))
@@ -300,11 +289,11 @@ def save_text_as_pdf(
 
         total_width = pagesize[0] - doc.leftMargin - doc.rightMargin
         col_widths = [
-            total_width * 0.11,  # Sheet Ref
-            total_width * 0.12,  # Discipline
-            total_width * 0.43,  # Description
-            total_width * 0.12,  # Code Section
-            total_width * 0.22,  # Required Correction
+            total_width * 0.11,
+            total_width * 0.12,
+            total_width * 0.43,
+            total_width * 0.12,
+            total_width * 0.22,
         ]
 
         table = Table(full_table_data, colWidths=col_widths, repeatRows=1)
@@ -344,7 +333,6 @@ def save_text_as_pdf(
         story.append(table)
 
     else:
-        # Fallback: just dump paragraphs
         for para in _split_paragraphs_from_lines(all_lines):
             story.append(Paragraph(para, normal_style))
             story.append(Spacer(1, 4 * mm))
@@ -445,10 +433,8 @@ def run_review_pipeline_single(
 
 def main(embed: bool = False):
     """
-    TI AMEP Review UI with:
-    - Persistent results via session_state
-    - Feedback saving that survives reruns
-    - ICC codes link
+    TI AMEP Review UI with session_state persistence,
+    ICC button, and Reset button.
     """
     if not embed:
         st.set_page_config(
@@ -465,7 +451,6 @@ def main(embed: bool = False):
         "Accessibility, Energy)."
     )
 
-    # Ensure OpenAI key
     env_api_key = os.environ.get("OPENAI_API_KEY", "")
     if not env_api_key:
         st.error(
@@ -476,14 +461,12 @@ def main(embed: bool = False):
 
     client = get_client(env_api_key)
 
-    # ---- Initialize session_state for persistence ----
     if "ti_review" not in st.session_state:
         st.session_state["ti_review"] = ""
         st.session_state["ti_usage"] = {}
         st.session_state["ti_pdf_bytes"] = None
         st.session_state["ti_filename"] = ""
 
-    # ---- File upload + project description ----
     uploaded_files = st.file_uploader(
         "Upload TI Plan Set PDF(s)",
         type=["pdf"],
@@ -511,7 +494,6 @@ def main(embed: bool = False):
         ),
     )
 
-    # ---- Run review button ----
     run_button = st.button("Run TI AMEP Review", type="primary")
 
     if run_button:
@@ -530,7 +512,6 @@ def main(embed: bool = False):
             f"Uploading and preparing file: {main_file.name} ..."
         )
 
-        # Save uploaded file to temp
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             tmp.write(main_file.read())
             tmp_path = tmp.name
@@ -575,7 +556,6 @@ def main(embed: bool = False):
             progress_bar.progress(100)
             status_placeholder.text("Step 3/3 – TI AMEP review complete.")
 
-            # ---- Save results into session_state so they persist ----
             st.session_state["ti_review"] = review_text
             st.session_state["ti_usage"] = usage_summary
             st.session_state["ti_pdf_bytes"] = pdf_bytes
@@ -598,7 +578,6 @@ def main(embed: bool = False):
 
         st.success("TI AMEP review complete.")
 
-    # ---- Display results from session_state (if any) ----
     review_text = st.session_state.get("ti_review", "")
     usage_summary = st.session_state.get("ti_usage", {}) or {}
     pdf_bytes = st.session_state.get("ti_pdf_bytes", None)
@@ -621,6 +600,7 @@ def main(embed: bool = False):
                 data=pdf_bytes,
                 file_name=download_name,
                 mime="application/pdf",
+                key="ti_pdf_download",
             )
 
         if usage_summary:
@@ -635,7 +615,6 @@ def main(embed: bool = False):
                     f"output: ${usage_summary['cost_output_usd']:.4f})"
                 )
 
-        # ---- Feedback block (uses stored results) ----
         st.subheader("Reviewer Feedback (internal only)")
         st.write(
             "Use this section to rate the accuracy of this TI AMEP review and "
@@ -659,7 +638,7 @@ def main(embed: bool = False):
             ),
         )
 
-        if st.button("Save TI AMEP Feedback"):
+        if st.button("Save TI AMEP Feedback", key="ti_save_feedback"):
             run_id = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%S")
             csv_path = Path("feedback_ti_amep.csv")
 
@@ -681,10 +660,56 @@ def main(embed: bool = False):
                 f"in {csv_path.resolve().parent}."
             )
 
-    # ---- ICC link available at all times ----
-    st.markdown(
-        "[Open ICC Codes (ICCsafe.org)](https://codes.iccsafe.org/)",
-    )
+        st.markdown("---")
+
+        col_icc, col_reset = st.columns(2)
+
+        with col_icc:
+            st.markdown(
+                """
+                <a href="https://codes.iccsafe.org/" target="_blank">
+                    <button style="
+                        background-color:#c45c26;
+                        color:white;
+                        border:none;
+                        padding:0.35rem 1.1rem;
+                        border-radius:999px;
+                        font-weight:600;
+                        cursor:pointer;
+                    ">
+                        Open ICC Codes (ICCsafe.org)
+                    </button>
+                </a>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with col_reset:
+            if st.button("Start New TI Review / Reset Results", key="ti_reset"):
+                for k in ("ti_review", "ti_usage", "ti_pdf_bytes", "ti_filename"):
+                    if k in st.session_state:
+                        del st.session_state[k]
+                st.experimental_rerun()
+    else:
+        st.markdown(
+            """
+            <a href="https://codes.iccsafe.org/" target="_blank">
+                <button style="
+                    background-color:#c45c26;
+                    color:white;
+                    border:none;
+                    padding:0.35rem 1.1rem;
+                    border-radius:999px;
+                    font-weight:600;
+                    cursor:pointer;
+                    margin-top:0.75rem;
+                ">
+                    Open ICC Codes (ICCsafe.org)
+                </button>
+            </a>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 if __name__ == "__main__":
