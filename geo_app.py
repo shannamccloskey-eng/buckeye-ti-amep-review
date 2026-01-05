@@ -531,6 +531,11 @@ def main(embed: bool = False):
                 "You can open this file in Excel for review."
             )
 
+        # ICC link
+        st.markdown(
+            "[Open ICC Codes (ICCsafe.org)](https://codes.iccsafe.org/)",
+        )
+
         st.caption(
             "This tool summarizes key geotechnical design parameters for plan review. "
             "It does not replace the professional judgment of a registered engineer. "
