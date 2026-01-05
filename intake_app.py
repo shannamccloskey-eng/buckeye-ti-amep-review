@@ -434,11 +434,9 @@ def main(embed: bool = False):
     )
 
     st.info(
-        "Step 1: Choose project type and indicate if it is food service.\n"
-        "Step 2: Upload the full plan set PDF.\n"
-        "Step 3: Upload ALL supporting documents you believe are required "
-        "(geotech report, special inspections form, hood specs, etc.).\n"
-        "Step 4: Run the intake check to verify completeness."
+        "Step 1: Upload the full plan set PDF.\n"
+        "Step 2: Add an optional project description.\n"
+        "Step 3: Run the intake check to verify completeness."
     )
 
     env_api_key = os.environ.get("OPENAI_API_KEY", "")
@@ -616,6 +614,11 @@ def main(embed: bool = False):
                 f"Feedback saved to {csv_path.name}. "
                 "You can open this file in Excel for review."
             )
+
+        # ICC link
+        st.markdown(
+            "[Open ICC Codes (ICCsafe.org)](https://codes.iccsafe.org/)",
+        )
 
 
 if __name__ == "__main__":
