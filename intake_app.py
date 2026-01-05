@@ -417,6 +417,12 @@ def run_intake_review_pipeline(
 # ---------------- STREAMLIT UI ----------------
 
 def main(embed: bool = False):
+    """
+    Commercial Plan Intake UI with:
+    - Persistent results via session_state
+    - Feedback saving that survives reruns
+    - ICC link
+    """
     if not embed:
         st.set_page_config(
             page_title="City of Buckeye – Commercial Plan Intake (Build 1.0)",
@@ -449,13 +455,19 @@ def main(embed: bool = False):
 
     client = get_client(env_api_key)
 
+    # Session state init
+    if "intake_review" not in st.session_state:
+        st.session_state["intake_review"] = ""
+        st.session_state["intake_pdf_bytes"] = None
+        st.session_state["intake_filename"] = ""
+
     uploaded_files = st.file_uploader(
         "Upload Commercial Plan Set PDF(s)",
         type=["pdf"],
         accept_multiple_files=True,
     )
 
-    main_file = None
+    main_file = None    # Primary plan set selected
     if uploaded_files:
         file_names = [f.name for f in uploaded_files]
         selected_name = st.selectbox(
@@ -538,6 +550,11 @@ def main(embed: bool = False):
             progress_bar.progress(100)
             status_placeholder.text("Intake review complete.")
 
+            # Save to session_state
+            st.session_state["intake_review"] = review_text
+            st.session_state["intake_pdf_bytes"] = pdf_bytes
+            st.session_state["intake_filename"] = main_file.name
+
         except Exception as e:
             st.error(f"Error during intake review: {e}")
             progress_bar.empty()
@@ -555,6 +572,12 @@ def main(embed: bool = False):
 
         st.success("Intake review complete.")
 
+    # Display stored results
+    review_text = st.session_state.get("intake_review", "")
+    pdf_bytes = st.session_state.get("intake_pdf_bytes", None)
+    filename = st.session_state.get("intake_filename", "")
+
+    if review_text:
         with st.expander("Show full AI intake report text"):
             st.text_area(
                 "Intake report output",
@@ -562,17 +585,18 @@ def main(embed: bool = False):
                 height=400,
             )
 
-        base_name = Path(main_file.name).stem
-        download_name = f"{base_name}_buckeye_intake_review.pdf"
+        if pdf_bytes:
+            base_name = Path(filename).stem if filename else "intake"
+            download_name = f"{base_name}_buckeye_intake_review.pdf"
 
-        st.download_button(
-            label="Download Intake Review PDF",
-            data=pdf_bytes,
-            file_name=download_name,
-            mime="application/pdf",
-        )
+            st.download_button(
+                label="Download Intake Review PDF",
+                data=pdf_bytes,
+                file_name=download_name,
+                mime="application/pdf",
+            )
 
-        # Feedback block
+        # Feedback
         st.subheader("Reviewer Feedback (internal only)")
         st.write(
             "Use this section to rate the accuracy of this intake review and "
@@ -584,10 +608,12 @@ def main(embed: bool = False):
             "How accurate was this intake review?",
             ["Looks good", "Mostly okay", "Needs corrections"],
             index=0,
+            key="intake_rating",
         )
 
         comments = st.text_area(
             "Notes / corrections",
+            key="intake_comments",
             placeholder=(
                 "Example: Energy compliance row should be 'Provided? – Yes' "
                 "because COMcheck is on A0.1; missing row for grease interceptor."
@@ -604,21 +630,21 @@ def main(embed: bool = False):
                 csv_path=csv_path,
                 tool_name="INTAKE",
                 run_id=run_id,
-                filename=main_file.name,
+                filename=filename or "(unknown)",
                 rating=rating,
                 comments=comments.strip(),
                 extra=extra_meta,
             )
 
             st.success(
-                f"Feedback saved to {csv_path.name}. "
-                "You can open this file in Excel for review."
+                f"Feedback saved to {csv_path.resolve().name} "
+                f"in {csv_path.resolve().parent}."
             )
 
-        # ICC link
-        st.markdown(
-            "[Open ICC Codes (ICCsafe.org)](https://codes.iccsafe.org/)",
-        )
+    # ICC link
+    st.markdown(
+        "[Open ICC Codes (ICCsafe.org)](https://codes.iccsafe.org/)",
+    )
 
 
 if __name__ == "__main__":
