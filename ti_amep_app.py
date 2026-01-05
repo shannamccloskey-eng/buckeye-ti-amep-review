@@ -689,7 +689,7 @@ def main(embed: bool = False):
                 for k in ("ti_review", "ti_usage", "ti_pdf_bytes", "ti_filename"):
                     if k in st.session_state:
                         del st.session_state[k]
-                st.experimental_rerun()
+                st.rerun()
     else:
         st.markdown(
             """
