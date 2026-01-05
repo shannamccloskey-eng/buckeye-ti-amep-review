@@ -348,6 +348,12 @@ def build_geotech_pdf(
 # ---------------- STREAMLIT UI ----------------
 
 def main(embed: bool = False):
+    """
+    Geotechnical Review UI with:
+    - Persistent results via session_state
+    - Feedback saving that survives reruns
+    - ICC link
+    """
     if not embed:
         st.set_page_config(
             page_title="City of Buckeye – Geotechnical Summary",
@@ -379,6 +385,13 @@ def main(embed: bool = False):
         st.stop()
 
     client = get_client(env_api_key)
+
+    # Session state init
+    if "geo_review" not in st.session_state:
+        st.session_state["geo_review"] = ""
+        st.session_state["geo_usage"] = {}
+        st.session_state["geo_pdf_bytes"] = None
+        st.session_state["geo_filename"] = ""
 
     uploaded_file = st.file_uploader(
         "Upload Geotechnical Report (PDF)",
@@ -431,6 +444,29 @@ def main(embed: bool = False):
 
             progress_bar.progress(100)
             status_placeholder.text("Geotechnical summary complete.")
+
+            review_text = result.get("review_text", "").strip()
+            usage_summary = result.get("usage", {}) or {}
+
+            # Save to session_state
+            st.session_state["geo_review"] = review_text
+            st.session_state["geo_usage"] = usage_summary
+
+            if review_text and REPORTLAB_AVAILABLE:
+                try:
+                    pdf_bytes = build_geotech_pdf(
+                        review_text,
+                        original_filename=uploaded_file.name,
+                    )
+                    st.session_state["geo_pdf_bytes"] = pdf_bytes
+                except Exception as e:
+                    st.error(f"Could not generate PDF summary: {e}")
+                    st.session_state["geo_pdf_bytes"] = None
+            else:
+                st.session_state["geo_pdf_bytes"] = None
+
+            st.session_state["geo_filename"] = uploaded_file.name
+
         except Exception as e:
             st.error(f"Error during geotechnical summary: {e}")
             return
@@ -442,14 +478,16 @@ def main(embed: bool = False):
 
         st.success("Geotechnical summary complete.")
 
-        review_text = result.get("review_text", "").strip()
-        usage_summary = result.get("usage", {}) or {}
+    # Display stored results
+    review_text = st.session_state.get("geo_review", "")
+    usage_summary = st.session_state.get("geo_usage", {}) or {}
+    pdf_bytes = st.session_state.get("geo_pdf_bytes", None)
+    filename = st.session_state.get("geo_filename", "")
 
-        # On-screen table
+    if review_text:
         st.subheader("Geotechnical Summary Table")
         st.markdown(review_text)
 
-        # Raw text expander
         with st.expander("Show raw table text"):
             st.text_area(
                 "Raw Markdown table",
@@ -457,37 +495,21 @@ def main(embed: bool = False):
                 height=300,
             )
 
-        base_name = Path(uploaded_file.name).stem if uploaded_file else "geotech_report"
+        if pdf_bytes:
+            base_name = Path(filename).stem if filename else "geotech_report"
+            download_name_pdf = f"{base_name}_buckeye_geotech_summary.pdf"
+            st.download_button(
+                label="Download Summary Report (.pdf)",
+                data=pdf_bytes,
+                file_name=download_name_pdf,
+                mime="application/pdf",
+            )
 
-        # PDF download
-        if review_text:
-            if REPORTLAB_AVAILABLE:
-                try:
-                    pdf_bytes = build_geotech_pdf(
-                        review_text,
-                        original_filename=uploaded_file.name,
-                    )
-                    download_name_pdf = f"{base_name}_buckeye_geotech_summary.pdf"
-                    st.download_button(
-                        label="Download Summary Report (.pdf)",
-                        data=pdf_bytes,
-                        file_name=download_name_pdf,
-                        mime="application/pdf",
-                    )
-                except Exception as e:
-                    st.error(f"Could not generate PDF summary: {e}")
-            else:
-                st.warning(
-                    "PDF generation requires the 'reportlab' package. "
-                    "Install it with `pip install reportlab` to enable PDF downloads."
-                )
-
-        # Token usage
         if usage_summary:
             st.subheader("Token usage (if reported by API)")
             st.json(usage_summary)
 
-        # Feedback block
+        # Feedback
         st.subheader("Reviewer Feedback (internal only)")
         st.write(
             "Use this section to rate the accuracy of this geotechnical summary "
@@ -499,10 +521,12 @@ def main(embed: bool = False):
             "How accurate was this summary?",
             ["Looks good", "Mostly okay", "Needs corrections"],
             index=0,
+            key="geo_rating",
         )
 
         geo_comments = st.text_area(
             "Notes / corrections",
+            key="geo_comments",
             placeholder=(
                 "Example: k-value listed in wrong row; minor structure footing depth "
                 "should be 18 in. per report."
@@ -520,29 +544,29 @@ def main(embed: bool = False):
                 csv_path=csv_path,
                 tool_name="GEO_SUMMARY",
                 run_id=run_id,
-                filename=uploaded_file.name,
+                filename=filename or "(unknown)",
                 rating=geo_rating,
                 comments=geo_comments.strip(),
                 extra=extra_meta,
             )
 
             st.success(
-                f"Feedback saved to {csv_path.name}. "
-                "You can open this file in Excel for review."
+                f"Feedback saved to {csv_path.resolve().name} "
+                f"in {csv_path.resolve().parent}."
             )
 
-        # ICC link
-        st.markdown(
-            "[Open ICC Codes (ICCsafe.org)](https://codes.iccsafe.org/)",
-        )
+    # ICC link
+    st.markdown(
+        "[Open ICC Codes (ICCsafe.org)](https://codes.iccsafe.org/)",
+    )
 
-        st.caption(
-            "This tool summarizes key geotechnical design parameters for plan review. "
-            "It does not replace the professional judgment of a registered engineer. "
-            "License status of the geotechnical engineer of record must be verified "
-            "directly in the Arizona Board of Technical Registration online register "
-            "(https://azbtr.portalus.thentiacloud.net/webs/portal/register/#/)."
-        )
+    st.caption(
+        "This tool summarizes key geotechnical design parameters for plan review. "
+        "It does not replace the professional judgment of a registered engineer. "
+        "License status of the geotechnical engineer of record must be verified "
+        "directly in the Arizona Board of Technical Registration online register "
+        "(https://azbtr.portalus.thentiacloud.net/webs/portal/register/#/)."
+    )
 
 
 if __name__ == "__main__":
