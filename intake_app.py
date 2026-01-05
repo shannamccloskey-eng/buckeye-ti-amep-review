@@ -660,7 +660,7 @@ def main(embed: bool = False):
                 for k in ("intake_review", "intake_pdf_bytes", "intake_filename"):
                     if k in st.session_state:
                         del st.session_state[k]
-                st.experimental_rerun()
+                st.rerun()
     else:
         st.markdown(
             """
