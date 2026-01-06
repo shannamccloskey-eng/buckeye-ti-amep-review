@@ -27,6 +27,12 @@ TOOLS: List[Dict[str, Any]] = [
         "func": "main",
         "kwargs": {"embed": True},  # geo_app.main(embed=...)
     },
+       {
+         "label": "Residential Review",
+         "module": "arch_app",
+         "func": "main",
+         "kwargs": {"embed": True},
+     },
     {
         "label": "Feedback Dashboard",
         "module": "feedback_dashboard_app",  # feedback_dashboard_app.py
@@ -34,12 +40,7 @@ TOOLS: List[Dict[str, Any]] = [
         "kwargs": {"embed": True},  # feedback_dashboard_app.main(embed=...)
     },
     # Future tools – e.g.:
-    # {
-    #     "label": "Architectural Review",
-    #     "module": "arch_app",
-    #     "func": "main",
-    #     "kwargs": {"embed": True},
-    # },
+  
 ]
 
 
