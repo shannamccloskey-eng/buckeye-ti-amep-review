@@ -7,10 +7,6 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 import streamlit as st
-# Simple no-op translation helper so "_" is always defined
-def _(s):
-    return s
-
 from openai import OpenAI
 from pypdf import PdfReader
 
@@ -570,7 +566,7 @@ def main(embed: bool = False):
                 for k in ("geo_review", "geo_usage", "geo_pdf_bytes", "geo_filename"):
                     if k in st.session_state:
                         del st.session_state[k]
-                st.experimental_rerun()
+                st.rerun()
     else:
         # Even with no results yet, show ICC button for convenience
         st.markdown(
