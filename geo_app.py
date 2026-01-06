@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 import streamlit as st
+# Simple no-op translation helper so "_" is always defined
+def _(s):
+    return s
+
 from openai import OpenAI
 from pypdf import PdfReader
 
