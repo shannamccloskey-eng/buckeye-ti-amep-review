@@ -4,6 +4,7 @@ from pathlib import Path
 
 import streamlit as st
 
+
 # -------------------------------------------------------------------
 # Registry of tools / sub-apps.
 # Each entry: label shown on tab, module name, function name, kwargs
@@ -11,36 +12,34 @@ import streamlit as st
 TOOLS: List[Dict[str, Any]] = [
     {
         "label": "Plan Intake",
-        "module": "intake_app",   # intake_app.py
+        "module": "intake_app",   # intake_app.py in SAME folder
         "func": "main",
-        "kwargs": {"embed": True},  # intake_app.main(embed=...)
+        "kwargs": {"embed": True},
     },
     {
         "label": "TI AMEP Review",
-        "module": "ti_amep_app",  # ti_amep_app.py
+        "module": "ti_amep_app",  # ti_amep_app.py in SAME folder
         "func": "main",
-        "kwargs": {"embed": True},  # ti_amep_app.main(embed=...)
+        "kwargs": {"embed": True},
     },
     {
         "label": "Geo Summary",
-        "module": "geo_app",      # geo_app.py
+        "module": "geo_app",      # geo_app.py in SAME folder
         "func": "main",
-        "kwargs": {"embed": True},  # geo_app.main(embed=...)
+        "kwargs": {"embed": True},
     },
-       {
-         "label": "Residential Review",
-         "module": "arch_app",
-         "func": "main",
-         "kwargs": {"embed": True},
-     },
+    {
+        "label": "Residential Review",
+        "module": "arch_app",     # arch_app.py in SAME folder
+        "func": "main",
+        "kwargs": {"embed": True},
+    },
     {
         "label": "Feedback Dashboard",
         "module": "feedback_dashboard_app",  # feedback_dashboard_app.py
         "func": "main",
-        "kwargs": {"embed": True},  # feedback_dashboard_app.main(embed=...)
+        "kwargs": {"embed": True},
     },
-    # Future tools – e.g.:
-  
 ]
 
 
@@ -56,21 +55,28 @@ def _load_tool_callable(tool: Dict[str, Any]) -> Callable[[], None]:
     kwargs = tool.get("kwargs", {})
 
     try:
+        # Try to import the module
         module = importlib.import_module(module_name)
+
+        # Get the function
         fn = getattr(module, func_name)
 
         def _wrapped():
-            # Call with kwargs (e.g., embed=True)
+            # Simple debug so you can see that the tab content is running
+            st.caption(f"[DEBUG] Loaded tool: {label} ({module_name}.{func_name})")
+            # Call the tool with kwargs (e.g. embed=True)
             return fn(**kwargs)
 
         return _wrapped
 
     except Exception as e:
-        # IMPORTANT: capture the message into a local variable
-        # so it still exists when the inner function runs.
+        # If anything goes wrong, show a clear error INSIDE THE TAB
         msg = (
             f"Tool '{label}' is not available right now "
-            f"({module_name}.{func_name}): {e}"
+            f"({module_name}.{func_name}).\n\n"
+            f"Python import error:\n`{e}`\n\n"
+            f"Make sure the file `{module_name}.py` exists in the same folder "
+            f"as `app.py` and that it imports correctly."
         )
 
         def _error(message: str = msg):
@@ -92,8 +98,8 @@ def _inject_custom_css() -> None:
         """
 <style>
 :root {
-  --buckeye-primary: #c45c26;        /* Buckeye orange */
-  --buckeye-primary-soft: #fbe6da;   /* soft orange background */
+  --buckeye-primary: #c45c26;
+  --buckeye-primary-soft: #fbe6da;
   --buckeye-dark: #1f2933;
   --buckeye-muted: #6b7280;
   --buckeye-border: #e0e4ea;
@@ -105,7 +111,7 @@ def _inject_custom_css() -> None:
   background: var(--buckeye-bg);
 }
 
-/* Sidebar (collapsed by default, but keep clean if opened) */
+/* Sidebar */
 [data-testid="stSidebar"] {
   background-color: white;
   border-right: 1px solid var(--buckeye-border);
@@ -116,18 +122,17 @@ html, body, [data-testid="stAppViewContainer"] {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-/* Main container spacing – bumped up to give logo more room */
+/* Main container spacing */
 .block-container {
   padding-top: 1.5rem;
 }
 
-/* Logo wrapper – extra padding so it isn't clipped at the top */
+/* Logo wrapper */
 .buckeye-logo {
   padding-top: 1.0rem;
   padding-bottom: 0.4rem;
 }
 
-/* Make sure the logo image itself never hugs the top edge */
 .buckeye-logo img {
   display: block;
 }
@@ -197,20 +202,9 @@ div[data-testid="stTabs"] + div {
   border-color: #ad4f21;
 }
 
-/* Secondary (e.g., download) buttons */
-button[kind="secondary"], button[kind="secondary"] * {
-  border-radius: 999px !important;
-}
-
 /* Info boxes / alerts */
 [data-baseweb="notification"] {
   border-radius: 10px;
-}
-
-/* Tables */
-table {
-  border-radius: 8px;
-  overflow: hidden;
 }
 
 /* Hide default Streamlit footer */
@@ -234,10 +228,9 @@ def main():
     _inject_custom_css()
 
     # ---- Header with Buckeye logo + title ----
-    logo_path = Path(__file__).parent / "City of Buckeye 2025.png"  # change name here if needed
+    logo_path = Path(__file__).parent / "City of Buckeye 2025.png"
 
-    # Align logo + title vertically in the header row
-    header_cols = st.columns([1, 3], vertical_alignment="center")
+    header_cols = st.columns([1, 3])
     with header_cols[0]:
         if logo_path.exists():
             st.markdown('<div class="buckeye-logo">', unsafe_allow_html=True)
@@ -264,6 +257,8 @@ def main():
 
     for tab, tool in zip(tabs, TOOLS):
         with tab:
+            # Each tab shows which tool it is trying to load
+            st.caption(f"[DEBUG] Loading tool: {tool['label']}")
             render_tool = _load_tool_callable(tool)
             render_tool()
 
