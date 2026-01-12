@@ -1,4 +1,5 @@
 import importlib
+import base64
 from typing import Callable, Dict, Any, List
 from pathlib import Path
 
@@ -12,25 +13,25 @@ import streamlit as st
 TOOLS: List[Dict[str, Any]] = [
     {
         "label": "Plan Intake",
-        "module": "intake_app",   # intake_app.py in SAME folder
+        "module": "intake_app",   # intake_app.py
         "func": "main",
-        "kwargs": {"embed": True},
+        "kwargs": {"embed": True},  # intake_app.main(embed=...)
     },
     {
         "label": "TI AMEP Review",
-        "module": "ti_amep_app",  # ti_amep_app.py in SAME folder
+        "module": "ti_amep_app",  # ti_amep_app.py
         "func": "main",
-        "kwargs": {"embed": True},
+        "kwargs": {"embed": True},  # ti_amep_app.main(embed=...)
     },
     {
         "label": "Geo Summary",
-        "module": "geo_app",      # geo_app.py in SAME folder
+        "module": "geo_app",      # geo_app.py
         "func": "main",
-        "kwargs": {"embed": True},
+        "kwargs": {"embed": True},  # geo_app.main(embed=...)
     },
     {
         "label": "Residential Review",
-        "module": "arch_app",     # arch_app.py in SAME folder
+        "module": "arch_app",
         "func": "main",
         "kwargs": {"embed": True},
     },
@@ -38,7 +39,7 @@ TOOLS: List[Dict[str, Any]] = [
         "label": "Feedback Dashboard",
         "module": "feedback_dashboard_app",  # feedback_dashboard_app.py
         "func": "main",
-        "kwargs": {"embed": True},
+        "kwargs": {"embed": True},  # feedback_dashboard_app.main(embed=...)
     },
 ]
 
@@ -55,28 +56,19 @@ def _load_tool_callable(tool: Dict[str, Any]) -> Callable[[], None]:
     kwargs = tool.get("kwargs", {})
 
     try:
-        # Try to import the module
         module = importlib.import_module(module_name)
-
-        # Get the function
         fn = getattr(module, func_name)
 
         def _wrapped():
-            # Simple debug so you can see that the tab content is running
-            st.caption(f"[DEBUG] Loaded tool: {label} ({module_name}.{func_name})")
-            # Call the tool with kwargs (e.g. embed=True)
+            # Call with kwargs (e.g., embed=True)
             return fn(**kwargs)
 
         return _wrapped
 
     except Exception as e:
-        # If anything goes wrong, show a clear error INSIDE THE TAB
         msg = (
             f"Tool '{label}' is not available right now "
-            f"({module_name}.{func_name}).\n\n"
-            f"Python import error:\n`{e}`\n\n"
-            f"Make sure the file `{module_name}.py` exists in the same folder "
-            f"as `app.py` and that it imports correctly."
+            f"({module_name}.{func_name}): {e}"
         )
 
         def _error(message: str = msg):
@@ -92,14 +84,14 @@ def _inject_custom_css() -> None:
     - Pill-style colored tabs
     - Card-style tab content
     - Modern buttons, backgrounds, etc.
-    - Extra padding + centering help for logo
+    - ICC logo button on tab row
     """
     st.markdown(
         """
 <style>
 :root {
-  --buckeye-primary: #c45c26;
-  --buckeye-primary-soft: #fbe6da;
+  --buckeye-primary: #c45c26;        /* Buckeye orange */
+  --buckeye-primary-soft: #fbe6da;   /* soft orange background */
   --buckeye-dark: #1f2933;
   --buckeye-muted: #6b7280;
   --buckeye-border: #e0e4ea;
@@ -111,7 +103,7 @@ def _inject_custom_css() -> None:
   background: var(--buckeye-bg);
 }
 
-/* Sidebar */
+/* Sidebar (collapsed by default, but keep clean if opened) */
 [data-testid="stSidebar"] {
   background-color: white;
   border-right: 1px solid var(--buckeye-border);
@@ -122,12 +114,12 @@ html, body, [data-testid="stAppViewContainer"] {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-/* Main container spacing */
+/* Main container spacing – bumped up to give logo more room */
 .block-container {
   padding-top: 1.5rem;
 }
 
-/* Logo wrapper */
+/* Logo wrapper – extra padding so it isn't clipped at the top */
 .buckeye-logo {
   padding-top: 1.0rem;
   padding-bottom: 0.4rem;
@@ -169,7 +161,7 @@ div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
   box-shadow: 0 4px 10px rgba(196,92,38,0.35) !important;
 }
 
-/* Remove any default underline / highlight from active tab */
+/* Remove default underline / highlight from active tab */
 div[data-testid="stTabs"] button[role="tab"][aria-selected="true"]::before,
 div[data-testid="stTabs"] button[role="tab"][aria-selected="true"]::after {
   border-bottom: none !important;
@@ -186,8 +178,9 @@ div[data-testid="stTabs"] + div {
   border: 1px solid var(--buckeye-border);
 }
 
-/* ---------------- Buttons ---------------- */
-.stButton>button {
+/* ---------------- Buttons (Run / Download / etc.) ---------------- */
+.stButton>button,
+.stDownloadButton>button {
   border-radius: 999px;
   border: 1px solid transparent;
   background: var(--buckeye-primary);
@@ -195,11 +188,18 @@ div[data-testid="stTabs"] + div {
   font-weight: 600;
   padding: 0.4rem 1.3rem;
   box-shadow: 0 4px 10px rgba(196,92,38,0.25);
+  min-width: 260px;
 }
 
-.stButton>button:hover {
+.stButton>button:hover,
+.stDownloadButton>button:hover {
   background: #ad4f21;
   border-color: #ad4f21;
+}
+
+/* Secondary (generic secondary buttons) */
+button[kind="secondary"], button[kind="secondary"] * {
+  border-radius: 999px !important;
 }
 
 /* Info boxes / alerts */
@@ -207,14 +207,62 @@ div[data-testid="stTabs"] + div {
   border-radius: 10px;
 }
 
+/* Tables */
+table {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
 /* Hide default Streamlit footer */
 footer, .stApp footer {
   visibility: hidden;
+}
+
+/* ---------------- ICC logo button on tab row ---------------- */
+.icc-tab-button-wrapper {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;   /* anchor to top of column */
+  align-items: center;           /* center label + pill relative to each other */
+  margin-top: 0.25rem;
+}
+
+.icc-access-label {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #0b4f6c;
+  margin-bottom: 0.25rem;
+  text-align: center;            /* center ACCESS over logo */
+  width: 100%;
+}
+
+.icc-tab-img-link {
+  display: inline-block;
+}
+
+.icc-tab-img-link img {
+  height: 104px;
+  width: auto;
+  display: block;
+  border-radius: 999px;
+  background: white;
+  padding: 12px 28px;
+  box-shadow: 0 8px 24px rgba(11,79,108,0.45);
 }
 </style>
         """,
         unsafe_allow_html=True,
     )
+
+
+def _image_to_base64(path: Path) -> str:
+    try:
+        data = path.read_bytes()
+        return base64.b64encode(data).decode("utf-8")
+    except Exception:
+        return ""
 
 
 def main():
@@ -230,7 +278,7 @@ def main():
     # ---- Header with Buckeye logo + title ----
     logo_path = Path(__file__).parent / "City of Buckeye 2025.png"
 
-    header_cols = st.columns([1, 3])
+    header_cols = st.columns([1, 3], vertical_alignment="center")
     with header_cols[0]:
         if logo_path.exists():
             st.markdown('<div class="buckeye-logo">', unsafe_allow_html=True)
@@ -245,20 +293,54 @@ def main():
         st.title("City of Buckeye – Plan Review Tools")
         st.write(
             "Unified interface for Building Safety tools, including Commercial Plan Intake, "
-            "TI AMEP review, Geotechnical summary, and the Feedback Dashboard. "
-            "Additional tools can be added as new tabs."
+            "TI AMEP review, Geotechnical summary, Residential review, and the Feedback Dashboard."
         )
 
     st.markdown("---")
 
-    # Build tabs from TOOLS registry
-    tab_labels = [tool["label"] for tool in TOOLS]
-    tabs = st.tabs(tab_labels)
+    # ---- Tabs + right-justified ICC button on the same row ----
+    tab_col, icc_col = st.columns([7, 1], vertical_alignment="top")
 
+    tab_labels = [tool["label"] for tool in TOOLS]
+
+    with tab_col:
+        tabs = st.tabs(tab_labels)
+
+    with icc_col:
+        icc_logo_path = Path(__file__).parent / "icc_logo.png"
+
+        if icc_logo_path.exists():
+            img_b64 = _image_to_base64(icc_logo_path)
+            st.markdown(
+                f"""
+                <div class="icc-tab-button-wrapper">
+                    <div class="icc-access-label">ACCESS</div>
+                    <a href="https://codes.iccsafe.org/" target="_blank"
+                       class="icc-tab-img-link">
+                        <img src="data:image/png;base64,{img_b64}"
+                             alt="ICC – International Code Council" />
+                    </a>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            # Simple text fallback if logo file is missing
+            st.markdown(
+                """
+                <div class="icc-tab-button-wrapper">
+                    <div class="icc-access-label">ACCESS</div>
+                    <a href="https://codes.iccsafe.org/" target="_blank">
+                        ICC Codes
+                    </a>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    # ---- Render each tool in its tab ----
     for tab, tool in zip(tabs, TOOLS):
         with tab:
-            # Each tab shows which tool it is trying to load
-            st.caption(f"[DEBUG] Loading tool: {tool['label']}")
             render_tool = _load_tool_callable(tool)
             render_tool()
 
